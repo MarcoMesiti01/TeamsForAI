@@ -1,0 +1,103 @@
+* {
+  box-sizing: border-box;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.container {
+  max-width: 900px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+h1 {
+  margin-bottom: 0.25rem;
+}
+
+.muted {
+  color: #94a3b8;
+}
+
+.panel {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+  padding: 1rem;
+  margin-top: 1rem;
+}
+
+.controls label {
+  display: block;
+  margin-bottom: 0.4rem;
+}
+
+input {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #0b1220;
+  color: #e2e8f0;
+  padding: 0.6rem 0.7rem;
+}
+
+.row {
+  margin-top: 0.9rem;
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+button {
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  cursor: pointer;
+  background: #2563eb;
+  color: white;
+}
+
+button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.status {
+  margin-top: 0.9rem;
+  color: #cbd5e1;
+}
+
+.transcript-panel h2 {
+  margin-top: 0;
+}
+
+.transcript {
+  min-height: 260px;
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 0.8rem;
+  background: #0b1220;
+}
+
+.line {
+  margin: 0.3rem 0;
+  white-space: pre-wrap;
+}
+
+.line.user {
+  color: #93c5fd;
+}
+
+.line.assistant {
+  color: #86efac;
+}
+
+.line.system {
+  color: #fcd34d;
+}

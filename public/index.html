@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TeamsForAI - Realtime Voice Demo</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>OpenAI Realtime Voice Demo</h1>
+      <p class="muted">Talk to the model in realtime and see live transcript updates.</p>
+
+      <section class="panel controls">
+        <label for="modelInput">Model</label>
+        <input id="modelInput" type="text" value="gpt-4o-realtime-preview" />
+
+        <div class="row">
+          <button id="connectBtn">Connect</button>
+          <button id="disconnectBtn" disabled>Disconnect</button>
+          <button id="micBtn" disabled>Mute Mic</button>
+        </div>
+
+        <p id="status" class="status">Status: idle</p>
+      </section>
+
+      <section class="panel transcript-panel">
+        <h2>Transcript</h2>
+        <div id="transcript" class="transcript"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

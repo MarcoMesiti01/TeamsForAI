@@ -1,0 +1,15 @@
+{
+  "name": "teamsforai-realtime-voice-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Simple localhost OpenAI Realtime voice + transcript demo",
+  "main": "server.js",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}

@@ -4,6 +4,9 @@ const disconnectBtn = document.getElementById("disconnectBtn");
 const micBtn = document.getElementById("micBtn");
 const statusEl = document.getElementById("status");
 const transcriptEl = document.getElementById("transcript");
+const undoBtn = document.getElementById("undoBtn");
+const boardStatusEl = document.getElementById("boardStatus");
+const boardEl = document.getElementById("board");
 const clientSessionId = crypto.randomUUID();
 
 let pc;
@@ -13,6 +16,10 @@ let localStream;
 let micEnabled = true;
 const transcriptByItem = new Map();
 const handledToolCalls = new Set();
+const NODE_WIDTH = 210;
+const NODE_HEIGHT = 112;
+let currentBoardState = { version: 0, nodes: [], edges: [], groups: [], can_undo: false };
+let dragState = null;
 
 function setStatus(text) {
   statusEl.textContent = `Status: ${text}`;
@@ -29,6 +36,198 @@ function appendLine(role, text) {
 
 function appendDebug(text) {
   appendLine("system", `[debug] ${text}`);
+}
+
+function getBoardSize(boardState) {
+  const nodes = boardState.nodes || [];
+  const maxX = Math.max(900, ...nodes.map((node) => Number(node.x || 0) + NODE_WIDTH + 160));
+  const maxY = Math.max(520, ...nodes.map((node) => Number(node.y || 0) + NODE_HEIGHT + 160));
+  return { width: maxX, height: maxY };
+}
+
+function getNodeById(boardState, id) {
+  return (boardState.nodes || []).find((node) => node.id === id);
+}
+
+function getNodeCenter(node) {
+  return {
+    x: Number(node.x || 0) + NODE_WIDTH / 2,
+    y: Number(node.y || 0) + NODE_HEIGHT / 2,
+  };
+}
+
+function clearElement(element) {
+  while (element.firstChild) {
+    element.removeChild(element.firstChild);
+  }
+}
+
+function createSvgElement(name, attrs = {}) {
+  const element = document.createElementNS("http://www.w3.org/2000/svg", name);
+  Object.entries(attrs).forEach(([key, value]) => {
+    element.setAttribute(key, String(value));
+  });
+  return element;
+}
+
+function drawEdges(edgeLayer, boardState) {
+  clearElement(edgeLayer);
+
+  const defs = createSvgElement("defs");
+  const marker = createSvgElement("marker", {
+    id: "arrowhead",
+    markerWidth: 10,
+    markerHeight: 10,
+    refX: 8,
+    refY: 5,
+    orient: "auto",
+  });
+  marker.appendChild(createSvgElement("path", {
+    d: "M 0 0 L 10 5 L 0 10 z",
+    fill: "#38bdf8",
+  }));
+  defs.appendChild(marker);
+  edgeLayer.appendChild(defs);
+
+  (boardState.edges || []).forEach((edge) => {
+    const from = getNodeById(boardState, edge.from);
+    const to = getNodeById(boardState, edge.to);
+    if (!from || !to) return;
+
+    const start = getNodeCenter(from);
+    const end = getNodeCenter(to);
+    const midX = (start.x + end.x) / 2;
+    const path = createSvgElement("path", {
+      d: `M ${start.x} ${start.y} C ${midX} ${start.y}, ${midX} ${end.y}, ${end.x} ${end.y}`,
+      class: "edge-path",
+      "marker-end": "url(#arrowhead)",
+    });
+    edgeLayer.appendChild(path);
+
+    if (edge.label) {
+      const label = createSvgElement("text", {
+        x: midX,
+        y: (start.y + end.y) / 2 - 8,
+        class: "edge-label",
+        textAnchor: "middle",
+      });
+      label.textContent = edge.label;
+      edgeLayer.appendChild(label);
+    }
+  });
+}
+
+function getGroupBounds(boardState, group) {
+  const nodes = (group.node_ids || [])
+    .map((id) => getNodeById(boardState, id))
+    .filter(Boolean);
+
+  if (!nodes.length) return null;
+
+  const left = Math.min(...nodes.map((node) => Number(node.x || 0))) - 28;
+  const top = Math.min(...nodes.map((node) => Number(node.y || 0))) - 46;
+  const right = Math.max(...nodes.map((node) => Number(node.x || 0) + NODE_WIDTH)) + 28;
+  const bottom = Math.max(...nodes.map((node) => Number(node.y || 0) + NODE_HEIGHT)) + 28;
+
+  return { left, top, width: right - left, height: bottom - top };
+}
+
+function drawGroups(groupLayer, boardState) {
+  clearElement(groupLayer);
+
+  (boardState.groups || []).forEach((group) => {
+    const bounds = getGroupBounds(boardState, group);
+    if (!bounds) return;
+
+    const region = document.createElement("section");
+    region.className = "board-group";
+    region.style.left = `${bounds.left}px`;
+    region.style.top = `${bounds.top}px`;
+    region.style.width = `${bounds.width}px`;
+    region.style.height = `${bounds.height}px`;
+
+    const label = document.createElement("span");
+    label.className = "board-group-label";
+    label.textContent = group.title;
+    region.appendChild(label);
+    groupLayer.appendChild(region);
+  });
+}
+
+function refreshBoardGeometry() {
+  const edgeLayer = boardEl.querySelector(".board-edges");
+  const groupLayer = boardEl.querySelector(".board-groups");
+  if (!edgeLayer || !groupLayer) return;
+
+  const size = getBoardSize(currentBoardState);
+  boardEl.style.minWidth = `${size.width}px`;
+  boardEl.style.minHeight = `${size.height}px`;
+  edgeLayer.setAttribute("width", size.width);
+  edgeLayer.setAttribute("height", size.height);
+  edgeLayer.setAttribute("viewBox", `0 0 ${size.width} ${size.height}`);
+  drawGroups(groupLayer, currentBoardState);
+  drawEdges(edgeLayer, currentBoardState);
+}
+
+function renderBoard(boardState) {
+  if (!boardState) return;
+  currentBoardState = boardState;
+
+  boardStatusEl.textContent = `Board version: ${boardState.version || 0}`;
+  undoBtn.disabled = !boardState.can_undo;
+  clearElement(boardEl);
+
+  if (!boardState.nodes?.length) {
+    const empty = document.createElement("p");
+    empty.className = "board-empty";
+    empty.textContent = "No board operations yet.";
+    boardEl.appendChild(empty);
+    return;
+  }
+
+  const size = getBoardSize(boardState);
+  boardEl.style.minWidth = `${size.width}px`;
+  boardEl.style.minHeight = `${size.height}px`;
+
+  const edgeLayer = createSvgElement("svg", {
+    class: "board-edges",
+    width: size.width,
+    height: size.height,
+    viewBox: `0 0 ${size.width} ${size.height}`,
+  });
+  const groupLayer = document.createElement("div");
+  groupLayer.className = "board-groups";
+  const nodeLayer = document.createElement("div");
+  nodeLayer.className = "board-nodes";
+
+  boardEl.appendChild(groupLayer);
+  boardEl.appendChild(edgeLayer);
+  boardEl.appendChild(nodeLayer);
+
+  boardState.nodes.forEach((node) => {
+    const item = document.createElement("article");
+    item.className = `board-node ${node.emphasis === "primary" ? "primary" : ""}`;
+    item.dataset.nodeId = node.id;
+    item.style.left = `${Number(node.x || 0)}px`;
+    item.style.top = `${Number(node.y || 0)}px`;
+    item.style.width = `${NODE_WIDTH}px`;
+    item.style.minHeight = `${NODE_HEIGHT}px`;
+
+    const title = document.createElement("h3");
+    title.textContent = node.text;
+    item.appendChild(title);
+
+    const meta = document.createElement("p");
+    meta.className = "node-meta";
+    meta.textContent = node.emphasis === "primary" ? "Primary thought" : "Idea node";
+    item.appendChild(meta);
+
+    item.addEventListener("pointerdown", startNodeDrag);
+    nodeLayer.appendChild(item);
+  });
+
+  drawGroups(groupLayer, boardState);
+  drawEdges(edgeLayer, boardState);
 }
 
 function upsertTranscriptItem(itemId, role, text) {
@@ -166,8 +365,15 @@ async function executeToolCall(name, rawArguments, callId) {
 
     dc.send(JSON.stringify({ type: "response.create" }));
 
-    if (name === "delegate_to_brain") {
+    if (output?.board_state) {
+      renderBoard(output.board_state);
+    }
+
+    if (name === "route_user_intent" || name === "delegate_to_brain") {
       appendDebug(`handled_by=${output?.handled_by || "unknown"}`);
+      if (output?.intent?.intent_type) {
+        appendDebug(`intent=${output.intent.intent_type}`);
+      }
       if (output?.usage) {
         appendDebug(`brain usage recorded`);
       }
@@ -177,6 +383,89 @@ async function executeToolCall(name, rawArguments, callId) {
     }
   } catch (error) {
     appendLine("system", `Tool execution failed (${name}): ${error.message}`);
+  }
+}
+
+async function undoBoard() {
+  try {
+    const resp = await fetch("/board/undo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_session_id: clientSessionId }),
+    });
+    const output = await resp.json();
+    renderBoard(output.board_state);
+    appendLine("system", output.ok ? "Undid the last board change." : "Nothing to undo.");
+  } catch (error) {
+    appendLine("system", `Undo failed: ${error.message}`);
+  }
+}
+
+function startNodeDrag(event) {
+  const card = event.currentTarget;
+  const node = getNodeById(currentBoardState, card.dataset.nodeId);
+  if (!node || event.button !== 0) return;
+
+  card.setPointerCapture(event.pointerId);
+  dragState = {
+    pointerId: event.pointerId,
+    nodeId: node.id,
+    card,
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    startX: Number(node.x || 0),
+    startY: Number(node.y || 0),
+  };
+  card.classList.add("dragging");
+}
+
+function moveDraggedNode(event) {
+  if (!dragState || event.pointerId !== dragState.pointerId) return;
+
+  const node = getNodeById(currentBoardState, dragState.nodeId);
+  if (!node) return;
+
+  const nextX = Math.max(24, dragState.startX + event.clientX - dragState.startClientX);
+  const nextY = Math.max(40, dragState.startY + event.clientY - dragState.startClientY);
+  node.x = Math.round(nextX);
+  node.y = Math.round(nextY);
+  dragState.card.style.left = `${node.x}px`;
+  dragState.card.style.top = `${node.y}px`;
+  refreshBoardGeometry();
+}
+
+async function finishNodeDrag(event) {
+  if (!dragState || event.pointerId !== dragState.pointerId) return;
+
+  const { card, nodeId, startX, startY } = dragState;
+  const node = getNodeById(currentBoardState, nodeId);
+  dragState = null;
+  card.classList.remove("dragging");
+
+  if (!node || (node.x === startX && node.y === startY)) return;
+
+  try {
+    const resp = await fetch("/board/operations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_session_id: clientSessionId,
+        operations: [{ type: "move_item", id: nodeId, x: node.x, y: node.y }],
+      }),
+    });
+    const output = await resp.json();
+    if (!resp.ok || !output.ok) {
+      throw new Error(output?.error || "Unable to save board move");
+    }
+    renderBoard(output.board_state);
+  } catch (error) {
+    const failedNode = getNodeById(currentBoardState, nodeId);
+    if (failedNode) {
+      failedNode.x = startX;
+      failedNode.y = startY;
+      renderBoard(currentBoardState);
+    }
+    appendLine("system", `Move failed: ${error.message}`);
   }
 }
 
@@ -286,3 +575,8 @@ function toggleMic() {
 connectBtn.addEventListener("click", connect);
 disconnectBtn.addEventListener("click", disconnect);
 micBtn.addEventListener("click", toggleMic);
+undoBtn.addEventListener("click", undoBoard);
+window.addEventListener("pointermove", moveDraggedNode);
+window.addEventListener("pointerup", finishNodeDrag);
+window.addEventListener("pointercancel", finishNodeDrag);
+renderBoard({ version: 0, nodes: [], edges: [], groups: [], can_undo: false });

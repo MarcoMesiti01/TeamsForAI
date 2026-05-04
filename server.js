@@ -1,7 +1,9 @@
 const path = require("path");
 const express = require("express");
-require("dotenv").config();
+require("dotenv").config({ path: path.join(__dirname, ".env"), override: true });
 const { delegateToBrain } = require("./lib/brainService");
+const { routeUserIntent } = require("./lib/intentRouter");
+const { createBoardState, applyBoardOperations, getBoardSnapshot, undoLastCheckpoint } = require("./lib/boardState");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,16 +17,12 @@ app.use(express.static(path.join(__dirname, "public")));
 const TOOL_DEFINITIONS = [
   {
     type: "function",
-    name: "delegate_to_brain",
+    name: "route_user_intent",
     description:
-      "Delegate complex tasks to the backend Brain model for deeper reasoning, long-form output, and non-realtime workflows.",
+      "Route spoken thinking or design work into structured intent, then let the backend Brain produce typed board operations.",
     parameters: {
       type: "object",
       properties: {
-        task_type: {
-          type: "string",
-          description: "Task class, e.g. draft_email, research, plan, summarize, analyze, code, workflow, flights",
-        },
         user_goal: {
           type: "string",
           description: "User objective in plain language",
@@ -42,28 +40,20 @@ const TOOL_DEFINITIONS = [
         },
         response_mode: {
           type: "string",
-          description: "Desired output style: short_answer, full_text, json_plan, tool_instructions",
-        },
-
-        origin: {
-          type: "string",
-          description: "Optional route origin for flight tasks",
-        },
-        destination: {
-          type: "string",
-          description: "Optional route destination for flight tasks",
-        },
-        date: {
-          type: "string",
-          description: "Optional date (YYYY-MM-DD), especially for flight tasks",
-        },
-        max_results: {
-          type: "number",
-          description: "Optional max results for list-oriented tasks",
-          default: 5,
+          description: "Desired output style: short_answer, board_update, full_text, json_plan, tool_instructions",
         },
       },
-      required: ["task_type", "user_goal"],
+      required: ["user_goal"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
+    name: "undo_board_operation",
+    description: "Undo the last applied board operation checkpoint.",
+    parameters: {
+      type: "object",
+      properties: {},
       additionalProperties: false,
     },
   },
@@ -72,11 +62,25 @@ const TOOL_DEFINITIONS = [
 const TOOLING_INSTRUCTIONS = [
   "You are the realtime controller assistant.",
   "Your job is low-latency voice UX: turn-taking, interruptions, and concise spoken replies.",
-  "Answer directly only for simple conversational requests that need no deep reasoning.",
-  "Call delegate_to_brain when tasks are multi-step, require long outputs, structured planning, external synthesis, or non-voice workflow actions.",
-  "For flight price search requests, delegate_to_brain and include origin, destination, and date whenever available.",
-  "When the brain returns, present a short spoken summary unless user requested full detail.",
+  "Keep casual chat, greetings, and simple factual answers conversational without using the board.",
+  "Use the board earlier for thinking work: call route_user_intent when the user wants to think through, organize, compare, prioritize, design, plan, map, brainstorm, structure, or explore an idea, even if the request is not very complex yet.",
+  "Also call route_user_intent for product thinking, workflows, user journeys, diagrams, whiteboards, idea maps, or non-voice workflow actions.",
+  "Call undo_board_operation when the user asks to undo, go back, or revert the last board change.",
+  "When the brain returns, present the spoken_summary briefly and do not narrate raw JSON.",
 ].join(" ");
+
+function getSessionState(clientSessionId) {
+  const existing = sessionStateStore.get(clientSessionId);
+  if (existing) return existing;
+
+  const state = {
+    last_task_type: "general",
+    last_user_goal: "",
+    board: createBoardState(),
+  };
+  sessionStateStore.set(clientSessionId, state);
+  return state;
+}
 
 app.post("/session", async (req, res) => {
   try {
@@ -136,14 +140,31 @@ app.post("/tools/execute", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Missing tool name." });
     }
 
-    if (toolName === "delegate_to_brain") {
-      const state = sessionStateStore.get(clientSessionId) || {
-        last_task_type: "general",
-        last_user_goal: "",
-      };
-      const result = await delegateToBrain(toolArgs, state);
+    if (toolName === "route_user_intent" || toolName === "delegate_to_brain") {
+      const state = getSessionState(clientSessionId);
+      const intent = toolName === "route_user_intent" ? routeUserIntent(toolArgs) : toolArgs;
+      const result = await delegateToBrain(intent, state);
       sessionStateStore.set(clientSessionId, state);
-      return res.json(result);
+      return res.json({
+        ...result,
+        intent,
+        board_state: result.board_state || getBoardSnapshot(state.board),
+      });
+    }
+
+    if (toolName === "undo_board_operation") {
+      const state = getSessionState(clientSessionId);
+      const undo = undoLastCheckpoint(state.board);
+      return res.json({
+        handled_by: "board",
+        spoken_summary: undo.ok ? "I undid the last board change." : "There is nothing to undo yet.",
+        full_response: undo.ok ? "Last checkpoint restored." : undo.error,
+        reasoning_summary: "Undo restores the board snapshot from the previous checkpoint.",
+        missing_info: [],
+        board_operations: [{ type: "undo" }],
+        undo_checkpoint_id: null,
+        ...undo,
+      });
     }
 
     return res.status(400).json({ ok: false, error: `Unknown tool: ${toolName}` });
@@ -154,6 +175,41 @@ app.post("/tools/execute", async (req, res) => {
       details: error.message,
     });
   }
+});
+
+app.get("/board/state", (req, res) => {
+  const clientSessionId = req.query?.client_session_id || "default";
+  const state = getSessionState(clientSessionId);
+  return res.json(getBoardSnapshot(state.board));
+});
+
+app.post("/board/operations", (req, res) => {
+  try {
+    const clientSessionId = req.body?.client_session_id || "default";
+    const operations = req.body?.operations;
+
+    if (!Array.isArray(operations) || !operations.length) {
+      return res.status(400).json({
+        ok: false,
+        error: "operations must be a non-empty array.",
+      });
+    }
+
+    const state = getSessionState(clientSessionId);
+    const result = applyBoardOperations(state.board, operations, { source: "user" });
+    return res.json(result);
+  } catch (error) {
+    return res.status(400).json({
+      ok: false,
+      error: error.message,
+    });
+  }
+});
+
+app.post("/board/undo", (req, res) => {
+  const clientSessionId = req.body?.client_session_id || "default";
+  const state = getSessionState(clientSessionId);
+  return res.json(undoLastCheckpoint(state.board));
 });
 
 app.get("*", (_req, res) => {

@@ -3,13 +3,13 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>TeamsForAI - Realtime Voice Demo</title>
+    <title>TeamsForAI - AI Whiteboard</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
     <main class="container">
-      <h1>OpenAI Realtime Voice Demo</h1>
-      <p class="muted">Talk to the model in realtime and see live transcript updates.</p>
+      <h1>TeamsForAI Whiteboard</h1>
+      <p class="muted">Speak ideas into a structured map, then reshape the board directly.</p>
 
       <section class="panel controls">
         <label for="modelInput">Model</label>
@@ -27,6 +27,18 @@
       <section class="panel transcript-panel">
         <h2>Transcript</h2>
         <div id="transcript" class="transcript"></div>
+      </section>
+
+      <section class="panel board-panel">
+        <div class="board-header">
+          <div>
+            <h2>Idea Map</h2>
+            <p class="muted">AI-created cards, groups, and arrows become a draggable structured map.</p>
+          </div>
+          <button id="undoBtn" disabled>Undo</button>
+        </div>
+        <div id="boardStatus" class="status">Board version: 0</div>
+        <div id="board" class="board"></div>
       </section>
     </main>
 

@@ -101,3 +101,128 @@ button[disabled] {
 .line.system {
   color: #fcd34d;
 }
+
+.board-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.board-header h2 {
+  margin: 0 0 0.25rem;
+}
+
+.board-panel {
+  overflow: auto;
+}
+
+.board {
+  position: relative;
+  margin-top: 1rem;
+  min-height: 520px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  overflow: hidden;
+  background:
+    linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    #07111f;
+  background-size: 32px 32px;
+  touch-action: none;
+}
+
+.board-empty {
+  margin: 1rem;
+  color: #94a3b8;
+}
+
+.board-edges,
+.board-groups,
+.board-nodes {
+  position: absolute;
+  inset: 0;
+}
+
+.board-edges {
+  z-index: 2;
+  pointer-events: none;
+}
+
+.board-groups {
+  z-index: 1;
+  pointer-events: none;
+}
+
+.board-nodes {
+  z-index: 3;
+}
+
+.edge-path {
+  fill: none;
+  stroke: #38bdf8;
+  stroke-width: 2;
+  stroke-linecap: round;
+  opacity: 0.85;
+}
+
+.edge-label {
+  fill: #bae6fd;
+  font-size: 12px;
+  paint-order: stroke;
+  stroke: #07111f;
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
+.board-group {
+  position: absolute;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 8px;
+  background: rgba(8, 47, 73, 0.22);
+}
+
+.board-group-label {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  color: #bae6fd;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.board-node {
+  position: absolute;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  padding: 0.85rem;
+  background: #0b1220;
+  box-shadow: 0 14px 35px rgba(2, 6, 23, 0.28);
+  cursor: grab;
+  user-select: none;
+}
+
+.board-node.primary {
+  border-color: #38bdf8;
+  background: #082f49;
+}
+
+.board-node.dragging {
+  cursor: grabbing;
+  border-color: #facc15;
+  box-shadow: 0 18px 45px rgba(250, 204, 21, 0.16);
+}
+
+.board-node h3 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.node-meta {
+  margin: 0.45rem 0;
+  color: #cbd5e1;
+  font-size: 0.85rem;
+}

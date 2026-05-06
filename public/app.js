@@ -369,7 +369,7 @@ async function executeToolCall(name, rawArguments, callId) {
       renderBoard(output.board_state);
     }
 
-    if (name === "route_user_intent" || name === "delegate_to_brain") {
+    if (name === "delegate_to_orchestrator" || name === "route_user_intent" || name === "delegate_to_brain") {
       appendDebug(`handled_by=${output?.handled_by || "unknown"}`);
       if (output?.intent?.intent_type) {
         appendDebug(`intent=${output.intent.intent_type}`);

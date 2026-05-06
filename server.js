@@ -17,33 +17,49 @@ app.use(express.static(path.join(__dirname, "public")));
 const TOOL_DEFINITIONS = [
   {
     type: "function",
-    name: "route_user_intent",
+    name: "delegate_to_orchestrator",
     description:
-      "Send the current user turn to the backend orchestrator so it can decide conversational answer, whiteboard use, clarification, or tool calls.",
+      "Send the user's intent-level goal and surrounding context to the backend orchestrator; it decides whether to answer, clarify, use persistent board context, or invoke downstream tools.",
     parameters: {
       type: "object",
       properties: {
         user_goal: {
           type: "string",
-          description: "User objective in plain language",
+          description: "The user's current objective or intent in plain language.",
         },
-        collected_context: {
+        spoken_context: {
           type: "string",
-          description: "Compact context already collected from conversation",
+          description: "Relevant details from the current spoken turn, including constraints, references, and uncertainty.",
         },
-        missing_info: {
-          type: "array",
-          description: "List of still-missing fields if any",
-          items: {
-            type: "string",
-          },
+        conversation_summary: {
+          type: "string",
+          description: "Compact summary of prior conversation needed to interpret this turn.",
+        },
+        visible_board_context: {
+          type: "string",
+          description: "Brief description of board content or visible shared context the user appears to reference.",
+        },
+        user_preference: {
+          type: "string",
+          description: "Any stated preference about format, tone, depth, ordering, or interaction style.",
         },
         response_mode: {
           type: "string",
-          description: "Desired output style: short_answer, board_update, full_text, json_plan, tool_instructions",
+          description: "Desired response style, such as short_answer, brief_clarification, board_artifact, full_text, or tool_instructions.",
+        },
+        candidate_artifact_type: {
+          type: "string",
+          description: "Optional likely artifact type if the user implied one, such as idea_map, plan, comparison, diagram, board, or conversation.",
         },
       },
-      required: ["user_goal"],
+      required: [
+        "user_goal",
+        "spoken_context",
+        "conversation_summary",
+        "visible_board_context",
+        "user_preference",
+        "response_mode",
+      ],
       additionalProperties: false,
     },
   },
@@ -62,10 +78,11 @@ const TOOL_DEFINITIONS = [
 const TOOLING_INSTRUCTIONS = [
   "You are the realtime controller assistant.",
   "Your job is low-latency voice UX: turn-taking, interruptions, and concise spoken replies.",
-  "Keep casual chat, greetings, and simple factual answers conversational without using the board.",
-  "Call route_user_intent whenever a user request may need backend orchestration beyond a direct voice reply; the backend decides whether to answer conversationally, use the board, ask a clarification, or call another tool.",
-  "Do not make final whiteboard routing decisions in the realtime controller; preserve turn-taking and pass the user goal plus compact context to the orchestrator.",
-  "Call undo_board_operation when the user asks to undo, go back, or revert the last board change.",
+  "Answer directly for short conversational responses, greetings, and simple factual replies that do not need persistent shared context.",
+  "Call delegate_to_orchestrator when the user is externalizing thought, comparing options, designing, planning, mapping relationships, or needs persistent shared context.",
+  "Ask a brief clarification yourself when the artifact goal is ambiguous enough that delegation would not have a clear target.",
+  "Do not decide board layout, whiteboard structure, or spatial placement yourself; pass intent-level context to the orchestrator instead.",
+  "Keep undo_board_operation as a direct deterministic UI action, and call it when the user asks to undo, go back, or revert the last board change.",
   "When the brain returns, present the spoken_summary briefly and do not narrate raw JSON.",
 ].join(" ");
 
@@ -143,9 +160,9 @@ app.post("/tools/execute", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Missing tool name." });
     }
 
-    if (toolName === "route_user_intent" || toolName === "delegate_to_brain") {
+    if (toolName === "delegate_to_orchestrator" || toolName === "route_user_intent" || toolName === "delegate_to_brain") {
       const state = getSessionState(clientSessionId);
-      const intent = toolName === "route_user_intent" ? await routeUserIntent(toolArgs, { board: state.board }) : toolArgs;
+      const intent = toolName === "delegate_to_brain" ? toolArgs : await routeUserIntent(toolArgs, { board: state.board });
       const result = await delegateToBrain(intent, state);
       sessionStateStore.set(clientSessionId, state);
       return res.json({

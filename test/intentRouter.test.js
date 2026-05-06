@@ -138,3 +138,24 @@ test("builds orchestrator input from aliases", () => {
   assert.equal(input.current_user_turn, "Clarify the roadmap");
   assert.equal(input.current_board_snapshot.version, 0);
 });
+
+
+test("builds orchestrator input from realtime delegate context fields", () => {
+  const input = buildOrchestratorInput({
+    user_goal: "Compare these launch paths",
+    spoken_context: "The user mentioned enterprise pilots and self-serve onboarding.",
+    conversation_summary: "We are discussing a founder roadmap.",
+    visible_board_context: "Board shows pricing, onboarding, and ICP nodes.",
+    user_preference: "Keep it concise.",
+    response_mode: "board_artifact",
+    candidate_artifact_type: "comparison",
+  });
+
+  assert.equal(input.current_user_turn, "Compare these launch paths");
+  assert.match(input.compact_conversation_context, /founder roadmap/);
+  assert.match(input.compact_conversation_context, /enterprise pilots/);
+  assert.match(input.compact_conversation_context, /Keep it concise/);
+  assert.equal(input.visible_board_context, "Board shows pricing, onboarding, and ICP nodes.");
+  assert.equal(input.response_mode, "board_artifact");
+  assert.equal(input.candidate_artifact_type, "comparison");
+});

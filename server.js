@@ -19,7 +19,7 @@ const TOOL_DEFINITIONS = [
     type: "function",
     name: "route_user_intent",
     description:
-      "Route spoken thinking or design work into structured intent, then let the backend Brain produce typed board operations.",
+      "Send the current user turn to the backend orchestrator so it can decide conversational answer, whiteboard use, clarification, or tool calls.",
     parameters: {
       type: "object",
       properties: {
@@ -63,8 +63,8 @@ const TOOLING_INSTRUCTIONS = [
   "You are the realtime controller assistant.",
   "Your job is low-latency voice UX: turn-taking, interruptions, and concise spoken replies.",
   "Keep casual chat, greetings, and simple factual answers conversational without using the board.",
-  "Use the board earlier for thinking work: call route_user_intent when the user wants to think through, organize, compare, prioritize, design, plan, map, brainstorm, structure, or explore an idea, even if the request is not very complex yet.",
-  "Also call route_user_intent for product thinking, workflows, user journeys, diagrams, whiteboards, idea maps, or non-voice workflow actions.",
+  "Call route_user_intent whenever a user request may need backend orchestration beyond a direct voice reply; the backend decides whether to answer conversationally, use the board, ask a clarification, or call another tool.",
+  "Do not make final whiteboard routing decisions in the realtime controller; preserve turn-taking and pass the user goal plus compact context to the orchestrator.",
   "Call undo_board_operation when the user asks to undo, go back, or revert the last board change.",
   "When the brain returns, present the spoken_summary briefly and do not narrate raw JSON.",
 ].join(" ");
@@ -142,7 +142,7 @@ app.post("/tools/execute", async (req, res) => {
 
     if (toolName === "route_user_intent" || toolName === "delegate_to_brain") {
       const state = getSessionState(clientSessionId);
-      const intent = toolName === "route_user_intent" ? routeUserIntent(toolArgs) : toolArgs;
+      const intent = toolName === "route_user_intent" ? await routeUserIntent(toolArgs, { board: state.board }) : toolArgs;
       const result = await delegateToBrain(intent, state);
       sessionStateStore.set(clientSessionId, state);
       return res.json({

@@ -98,6 +98,34 @@ test("uses deterministic fallback only for explicit undo commands", async () => 
   assert.equal(intent.tool_plan[0].tool, "undo_board_operation");
 });
 
+
+test("uses orchestrator policy default when model routing falls back without an API key", async () => {
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  const previousModel = process.env.ORCHESTRATOR_MODEL;
+
+  try {
+    delete process.env.OPENAI_API_KEY;
+    process.env.ORCHESTRATOR_MODEL = "test-orchestrator-model";
+
+    const intent = await routeUserIntent({ user_goal: "Say hello" });
+
+    assert.equal(intent.route_action, "answer_conversationally");
+    assert.equal(intent.preferred_model, "test-orchestrator-model");
+  } finally {
+    if (previousApiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousApiKey;
+    }
+
+    if (previousModel === undefined) {
+      delete process.env.ORCHESTRATOR_MODEL;
+    } else {
+      process.env.ORCHESTRATOR_MODEL = previousModel;
+    }
+  }
+});
+
 test("rejects unsupported router payloads instead of returning free-form actions", async () => {
   await assert.rejects(
     () => routeUserIntent({ user_goal: "" }),

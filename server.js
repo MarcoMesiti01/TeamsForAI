@@ -4,11 +4,11 @@ require("dotenv").config({ path: path.join(__dirname, ".env"), override: true })
 const { delegateToBrain } = require("./lib/brainService");
 const { routeUserIntent } = require("./lib/intentRouter");
 const { createBoardState, applyBoardOperations, getBoardSnapshot, undoLastCheckpoint } = require("./lib/boardState");
+const { MODEL_ROLES, selectModel } = require("./lib/modelPolicy");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const DEFAULT_MODEL = process.env.DEFAULT_REALTIME_MODEL || "gpt-4o-realtime-preview";
 const sessionStateStore = new Map();
 
 app.use(express.json());
@@ -90,10 +90,13 @@ app.post("/session", async (req, res) => {
       });
     }
 
-    const requestedModel = (req.body?.model || DEFAULT_MODEL).toString().trim();
-    if (!requestedModel) {
-      return res.status(400).json({ error: "Model is required." });
-    }
+    const frontendModelOverride = String(req.body?.model || "").trim();
+    const selectedModel = frontendModelOverride || selectModel({
+      role: MODEL_ROLES.realtime_controller,
+      complexity: "low",
+      latency_budget: "realtime",
+      artifact_type: "conversation",
+    }).model;
 
     const response = await fetch("https://api.openai.com/v1/realtime/sessions", {
       method: "POST",
@@ -102,7 +105,7 @@ app.post("/session", async (req, res) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: requestedModel,
+        model: selectedModel,
         voice: "alloy",
         tools: TOOL_DEFINITIONS,
         instructions: TOOLING_INSTRUCTIONS,
@@ -120,7 +123,7 @@ app.post("/session", async (req, res) => {
 
     return res.json({
       client_secret: data.client_secret,
-      model: requestedModel,
+      model: selectedModel,
     });
   } catch (error) {
     return res.status(500).json({

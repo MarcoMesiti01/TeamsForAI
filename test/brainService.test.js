@@ -29,3 +29,26 @@ test("brain returns spoken summary, reasoning summary, board operations, and und
   assert.equal(typeof result.undo_checkpoint_id, "string");
   assert.equal(state.board.undo_stack.at(-1).checkpoint_id, result.undo_checkpoint_id);
 });
+
+test("brain keeps deterministic board labels in the detected request language", async () => {
+  const state = {
+    last_task_type: "general",
+    last_user_goal: "",
+    board: createBoardState(),
+  };
+
+  const result = await delegateToBrain({
+    intent_type: "develop_idea_map",
+    user_goal: "Descrivi il processo di approvazione dei rimborsi",
+    target_artifact: "idea_map",
+    known_context: "",
+    missing_info: [],
+    confidence: 0.86,
+  }, state);
+
+  const nodeTexts = result.board_operations
+    .filter((operation) => operation.type === "create_node")
+    .map((operation) => operation.text);
+
+  assert.ok(nodeTexts.includes("Obiettivo utente"));
+});

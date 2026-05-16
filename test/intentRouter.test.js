@@ -26,6 +26,36 @@ test("routes lightweight thinking requests to the board before they become compl
   assert.equal(intent.target_artifact, "idea_map");
 });
 
+test("routes process description requests to the board", () => {
+  const intent = routeUserIntent({
+    user_goal: "Describe the process for refund approval",
+  });
+
+  assert.equal(intent.intent_type, "develop_idea_map");
+  assert.equal(intent.target_artifact, "idea_map");
+});
+
+test("trusts explicit multilingual semantic intent from the realtime model", () => {
+  const intent = routeUserIntent({
+    user_goal: "返金承認のプロセスを説明してください",
+    intent_type: "develop_idea_map",
+    target_artifact: "idea_map",
+  });
+
+  assert.equal(intent.intent_type, "develop_idea_map");
+  assert.equal(intent.target_artifact, "idea_map");
+});
+
+test("uses multilingual fallback when no explicit intent is provided", () => {
+  const italian = routeUserIntent({ user_goal: "Descrivi il processo di approvazione dei rimborsi" });
+  const vietnamese = routeUserIntent({ user_goal: "Mô tả quy trình phê duyệt hoàn tiền" });
+  const japanese = routeUserIntent({ user_goal: "返金承認のプロセスを説明してください" });
+
+  assert.equal(italian.intent_type, "develop_idea_map");
+  assert.equal(vietnamese.intent_type, "develop_idea_map");
+  assert.equal(japanese.intent_type, "develop_idea_map");
+});
+
 test("keeps casual conversation off the board", () => {
   const intent = routeUserIntent({
     user_goal: "Good morning, how are you?",

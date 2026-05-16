@@ -25,11 +25,22 @@ const TOOL_DEFINITIONS = [
       properties: {
         user_goal: {
           type: "string",
-          description: "User objective in plain language",
+          description: "User objective in the user's original language.",
+        },
+        intent_type: {
+          type: "string",
+          enum: ["develop_idea_map", "answer_simple"],
+          description:
+            "Language-independent semantic intent. Use develop_idea_map for thinking, design, planning, process, workflow, comparison, or structure requests in any language; use answer_simple for casual chat or simple factual answers.",
+        },
+        target_artifact: {
+          type: "string",
+          enum: ["idea_map", "conversation"],
+          description: "Use idea_map when the board should be updated; use conversation when no board is needed.",
         },
         collected_context: {
           type: "string",
-          description: "Compact context already collected from conversation",
+          description: "Compact context already collected from conversation, preserving the user's language when useful.",
         },
         missing_info: {
           type: "array",
@@ -43,7 +54,7 @@ const TOOL_DEFINITIONS = [
           description: "Desired output style: short_answer, board_update, full_text, json_plan, tool_instructions",
         },
       },
-      required: ["user_goal"],
+      required: ["user_goal", "intent_type", "target_artifact"],
       additionalProperties: false,
     },
   },
@@ -62,9 +73,11 @@ const TOOL_DEFINITIONS = [
 const TOOLING_INSTRUCTIONS = [
   "You are the realtime controller assistant.",
   "Your job is low-latency voice UX: turn-taking, interruptions, and concise spoken replies.",
+  "The user may speak in any language supported by the model. Decide tool use semantically, not by English keywords.",
   "Keep casual chat, greetings, and simple factual answers conversational without using the board.",
-  "Use the board earlier for thinking work: call route_user_intent when the user wants to think through, organize, compare, prioritize, design, plan, map, brainstorm, structure, or explore an idea, even if the request is not very complex yet.",
-  "Also call route_user_intent for product thinking, workflows, user journeys, diagrams, whiteboards, idea maps, or non-voice workflow actions.",
+  "Use the board earlier for thinking work: call route_user_intent when the user wants to think through, describe a process, outline steps, organize, compare, prioritize, design, plan, map, brainstorm, structure, or explore an idea, even if the request is not very complex yet.",
+  "Also call route_user_intent for product thinking, workflows, process flows, user journeys, diagrams, whiteboards, idea maps, or non-voice workflow actions.",
+  "When calling route_user_intent, set intent_type and target_artifact based on meaning in the user's language, and keep user_goal in the original language.",
   "Call undo_board_operation when the user asks to undo, go back, or revert the last board change.",
   "When the brain returns, present the spoken_summary briefly and do not narrate raw JSON.",
 ].join(" ");

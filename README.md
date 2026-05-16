@@ -11,7 +11,7 @@ Localhost web app that connects to the OpenAI Realtime API with voice input/outp
   - Connect/disconnect to Realtime
   - Microphone mute/unmute
   - Live transcript for user + assistant
-  - Model field so you can choose model in UI
+  - Optional model field that overrides only the realtime controller model
 - **Voice controller + router + brain split**
   - Realtime model acts as low-latency voice controller
   - Single high-level tool: `route_user_intent`
@@ -50,7 +50,10 @@ copy .env.example .env
 
 ```env
 OPENAI_API_KEY=your_real_key_here
+DEFAULT_REALTIME_MODEL=gpt-4o-realtime-preview
+ORCHESTRATOR_MODEL=gpt-4.1-mini
 BRAIN_MODEL=gpt-4.1-mini
+WHITEBOARD_MODEL=gpt-4.1-mini
 ```
 
 ## Run
@@ -65,7 +68,7 @@ Then open:
 
 ## Usage
 
-1. Enter a realtime model in the model field (or keep default).
+1. Optionally enter a realtime model override, or leave the field blank to use `DEFAULT_REALTIME_MODEL`.
 2. Click **Connect** and allow microphone access.
 3. Speak and listen to model audio responses.
 4. See transcript updates in the transcript panel.

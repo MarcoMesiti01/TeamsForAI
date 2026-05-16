@@ -4,11 +4,11 @@ require("dotenv").config({ path: path.join(__dirname, ".env"), override: true })
 const { delegateToBrain } = require("./lib/brainService");
 const { routeUserIntent } = require("./lib/intentRouter");
 const { createBoardState, applyBoardOperations, getBoardSnapshot, undoLastCheckpoint } = require("./lib/boardState");
+const { MODEL_ROLES, selectModel } = require("./lib/modelPolicy");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const DEFAULT_MODEL = process.env.DEFAULT_REALTIME_MODEL || "gpt-4o-realtime-preview";
 const sessionStateStore = new Map();
 
 app.use(express.json());
@@ -17,44 +17,49 @@ app.use(express.static(path.join(__dirname, "public")));
 const TOOL_DEFINITIONS = [
   {
     type: "function",
-    name: "route_user_intent",
+    name: "delegate_to_orchestrator",
     description:
-      "Route spoken thinking or design work into structured intent, then let the backend Brain produce typed board operations.",
+      "Send the user's intent-level goal and surrounding context to the backend orchestrator; it decides whether to answer, clarify, use persistent board context, or invoke downstream tools.",
     parameters: {
       type: "object",
       properties: {
         user_goal: {
           type: "string",
-          description: "User objective in the user's original language.",
+          description: "The user's current objective or intent in plain language.",
         },
-        intent_type: {
+        spoken_context: {
           type: "string",
-          enum: ["develop_idea_map", "answer_simple"],
-          description:
-            "Language-independent semantic intent. Use develop_idea_map for thinking, design, planning, process, workflow, comparison, or structure requests in any language; use answer_simple for casual chat or simple factual answers.",
+          description: "Relevant details from the current spoken turn, including constraints, references, and uncertainty.",
         },
-        target_artifact: {
+        conversation_summary: {
           type: "string",
-          enum: ["idea_map", "conversation"],
-          description: "Use idea_map when the board should be updated; use conversation when no board is needed.",
+          description: "Compact summary of prior conversation needed to interpret this turn.",
         },
-        collected_context: {
+        visible_board_context: {
           type: "string",
-          description: "Compact context already collected from conversation, preserving the user's language when useful.",
+          description: "Brief description of board content or visible shared context the user appears to reference.",
         },
-        missing_info: {
-          type: "array",
-          description: "List of still-missing fields if any",
-          items: {
-            type: "string",
-          },
+        user_preference: {
+          type: "string",
+          description: "Any stated preference about format, tone, depth, ordering, or interaction style.",
         },
         response_mode: {
           type: "string",
-          description: "Desired output style: short_answer, board_update, full_text, json_plan, tool_instructions",
+          description: "Desired response style, such as short_answer, brief_clarification, board_artifact, full_text, or tool_instructions.",
+        },
+        candidate_artifact_type: {
+          type: "string",
+          description: "Optional likely artifact type if the user implied one, such as idea_map, plan, comparison, diagram, board, or conversation.",
         },
       },
-      required: ["user_goal", "intent_type", "target_artifact"],
+      required: [
+        "user_goal",
+        "spoken_context",
+        "conversation_summary",
+        "visible_board_context",
+        "user_preference",
+        "response_mode",
+      ],
       additionalProperties: false,
     },
   },
@@ -73,12 +78,11 @@ const TOOL_DEFINITIONS = [
 const TOOLING_INSTRUCTIONS = [
   "You are the realtime controller assistant.",
   "Your job is low-latency voice UX: turn-taking, interruptions, and concise spoken replies.",
-  "The user may speak in any language supported by the model. Decide tool use semantically, not by English keywords.",
-  "Keep casual chat, greetings, and simple factual answers conversational without using the board.",
-  "Use the board earlier for thinking work: call route_user_intent when the user wants to think through, describe a process, outline steps, organize, compare, prioritize, design, plan, map, brainstorm, structure, or explore an idea, even if the request is not very complex yet.",
-  "Also call route_user_intent for product thinking, workflows, process flows, user journeys, diagrams, whiteboards, idea maps, or non-voice workflow actions.",
-  "When calling route_user_intent, set intent_type and target_artifact based on meaning in the user's language, and keep user_goal in the original language.",
-  "Call undo_board_operation when the user asks to undo, go back, or revert the last board change.",
+  "Answer directly for short conversational responses, greetings, and simple factual replies that do not need persistent shared context.",
+  "Call delegate_to_orchestrator when the user is externalizing thought, comparing options, designing, planning, mapping relationships, or needs persistent shared context.",
+  "Ask a brief clarification yourself when the artifact goal is ambiguous enough that delegation would not have a clear target.",
+  "Do not decide board layout, whiteboard structure, or spatial placement yourself; pass intent-level context to the orchestrator instead.",
+  "Keep undo_board_operation as a direct deterministic UI action, and call it when the user asks to undo, go back, or revert the last board change.",
   "When the brain returns, present the spoken_summary briefly and do not narrate raw JSON.",
 ].join(" ");
 
@@ -103,10 +107,13 @@ app.post("/session", async (req, res) => {
       });
     }
 
-    const requestedModel = (req.body?.model || DEFAULT_MODEL).toString().trim();
-    if (!requestedModel) {
-      return res.status(400).json({ error: "Model is required." });
-    }
+    const frontendModelOverride = String(req.body?.model || "").trim();
+    const selectedModel = frontendModelOverride || selectModel({
+      role: MODEL_ROLES.realtime_controller,
+      complexity: "low",
+      latency_budget: "realtime",
+      artifact_type: "conversation",
+    }).model;
 
     const response = await fetch("https://api.openai.com/v1/realtime/sessions", {
       method: "POST",
@@ -115,7 +122,7 @@ app.post("/session", async (req, res) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: requestedModel,
+        model: selectedModel,
         voice: "alloy",
         tools: TOOL_DEFINITIONS,
         instructions: TOOLING_INSTRUCTIONS,
@@ -133,7 +140,7 @@ app.post("/session", async (req, res) => {
 
     return res.json({
       client_secret: data.client_secret,
-      model: requestedModel,
+      model: selectedModel,
     });
   } catch (error) {
     return res.status(500).json({
@@ -153,9 +160,9 @@ app.post("/tools/execute", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Missing tool name." });
     }
 
-    if (toolName === "route_user_intent" || toolName === "delegate_to_brain") {
+    if (toolName === "delegate_to_orchestrator" || toolName === "route_user_intent" || toolName === "delegate_to_brain") {
       const state = getSessionState(clientSessionId);
-      const intent = toolName === "route_user_intent" ? routeUserIntent(toolArgs) : toolArgs;
+      const intent = toolName === "delegate_to_brain" ? toolArgs : await routeUserIntent(toolArgs, { board: state.board });
       const result = await delegateToBrain(intent, state);
       sessionStateStore.set(clientSessionId, state);
       return res.json({

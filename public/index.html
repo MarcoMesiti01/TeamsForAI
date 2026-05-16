@@ -7,41 +7,39 @@
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <main class="app-shell">
-      <section class="board-panel" aria-label="Whiteboard">
-        <div class="board-header">
-          <div>
-            <h2>Idea Map</h2>
-            <p class="muted">Speak ideas into a structured map, then reshape the board directly.</p>
-          </div>
+    <main class="container">
+      <h1>TeamsForAI Whiteboard</h1>
+      <p class="muted">Speak ideas into a structured map, then reshape the board directly.</p>
+
+      <section class="panel controls">
+        <label for="modelInput">Model</label>
+        <input id="modelInput" type="text" placeholder="Backend default realtime model" />
+
+        <div class="row">
+          <button id="connectBtn">Connect</button>
+          <button id="disconnectBtn" disabled>Disconnect</button>
+          <button id="micBtn" disabled>Mute Mic</button>
         </div>
-        <div id="boardStatus" class="status">Board version: 0</div>
-        <div id="board" class="board"></div>
+
+        <p id="status" class="status">Status: idle</p>
       </section>
 
-      <section class="transcript-panel" aria-label="Transcript">
+      <section class="panel transcript-panel">
         <h2>Transcript</h2>
         <div id="transcript" class="transcript"></div>
       </section>
 
-      <aside class="command-pane" aria-label="Commands">
-        <div class="brand-block">
-          <h1>TeamsForAI</h1>
-          <p class="muted">Voice-driven whiteboard</p>
-        </div>
-
-        <label for="modelInput">Model</label>
-        <input id="modelInput" type="text" value="gpt-4o-realtime-preview" />
-
-        <div class="command-stack">
-          <button id="connectBtn">Connect</button>
-          <button id="disconnectBtn" disabled>Disconnect</button>
-          <button id="micBtn" disabled>Mute Mic</button>
+      <section class="panel board-panel">
+        <div class="board-header">
+          <div>
+            <h2>Idea Map</h2>
+            <p class="muted">AI-created cards, groups, and arrows become a draggable structured map.</p>
+          </div>
           <button id="undoBtn" disabled>Undo</button>
         </div>
-
-        <p id="status" class="status">Status: idle</p>
-      </aside>
+        <div id="boardStatus" class="status">Board version: 0</div>
+        <div id="board" class="board"></div>
+      </section>
     </main>
 
     <script src="/app.js"></script>

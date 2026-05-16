@@ -262,7 +262,7 @@ async function getEphemeralKey(model) {
     throw new Error("No ephemeral key returned from backend");
   }
 
-  return token;
+  return { token, model: data.model };
 }
 
 function bindDataChannel(channel) {
@@ -369,7 +369,7 @@ async function executeToolCall(name, rawArguments, callId) {
       renderBoard(output.board_state);
     }
 
-    if (name === "route_user_intent" || name === "delegate_to_brain") {
+    if (name === "delegate_to_orchestrator" || name === "route_user_intent" || name === "delegate_to_brain") {
       appendDebug(`handled_by=${output?.handled_by || "unknown"}`);
       if (output?.intent?.intent_type) {
         appendDebug(`intent=${output.intent.intent_type}`);
@@ -470,17 +470,15 @@ async function finishNodeDrag(event) {
 }
 
 async function connect() {
-  const model = modelInput.value.trim();
-  if (!model) {
-    alert("Please provide a model name.");
-    return;
-  }
+  const modelOverride = modelInput.value.trim();
 
   connectBtn.disabled = true;
   setStatus("connecting...");
 
   try {
-    const ephemeralKey = await getEphemeralKey(model);
+    const session = await getEphemeralKey(modelOverride);
+    const ephemeralKey = session.token;
+    const selectedModel = session.model || modelOverride;
 
     pc = new RTCPeerConnection();
     audioEl = document.createElement("audio");
@@ -500,7 +498,7 @@ async function connect() {
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
 
-    const sdpResp = await fetch(`https://api.openai.com/v1/realtime?model=${encodeURIComponent(model)}`, {
+    const sdpResp = await fetch(`https://api.openai.com/v1/realtime?model=${encodeURIComponent(selectedModel)}`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${ephemeralKey}`,
@@ -521,7 +519,7 @@ async function connect() {
     micBtn.disabled = false;
     micEnabled = true;
     micBtn.textContent = "Mute Mic";
-    appendLine("system", `Connected using model: ${model}`);
+    appendLine("system", `Connected using model: ${selectedModel}`);
   } catch (err) {
     appendLine("system", `Connection failed: ${err.message}`);
     setStatus("error");

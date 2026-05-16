@@ -94,6 +94,8 @@ function getSessionState(clientSessionId) {
     last_task_type: "general",
     last_user_goal: "",
     board: createBoardState(),
+    selected_item: null,
+    recently_moved_item: null,
   };
   sessionStateStore.set(clientSessionId, state);
   return state;
@@ -162,7 +164,16 @@ app.post("/tools/execute", async (req, res) => {
 
     if (toolName === "delegate_to_orchestrator" || toolName === "route_user_intent" || toolName === "delegate_to_brain") {
       const state = getSessionState(clientSessionId);
-      const intent = toolName === "delegate_to_brain" ? toolArgs : await routeUserIntent(toolArgs, { board: state.board });
+      if (toolArgs.selected_item && typeof toolArgs.selected_item === "object") {
+        state.selected_item = toolArgs.selected_item;
+      }
+      const intent = toolName === "delegate_to_brain"
+        ? toolArgs
+        : await routeUserIntent(toolArgs, {
+            board: state.board,
+            selected_item: state.selected_item,
+            recently_moved_item: state.recently_moved_item,
+          });
       const result = await delegateToBrain(intent, state);
       sessionStateStore.set(clientSessionId, state);
       return res.json({
@@ -216,7 +227,20 @@ app.post("/board/operations", (req, res) => {
     }
 
     const state = getSessionState(clientSessionId);
+    if (req.body?.selected_item && typeof req.body.selected_item === "object") {
+      state.selected_item = req.body.selected_item;
+    }
     const result = applyBoardOperations(state.board, operations, { source: "user" });
+    const moved = [...operations].reverse().find((operation) => operation.type === "move_item" && operation.id);
+    if (moved) {
+      state.recently_moved_item = {
+        id: moved.id,
+        type: "node",
+        x: Number.isFinite(moved.x) ? moved.x : null,
+        y: Number.isFinite(moved.y) ? moved.y : null,
+      };
+      state.selected_item = state.selected_item || { id: moved.id, type: "node" };
+    }
     return res.json(result);
   } catch (error) {
     return res.status(400).json({

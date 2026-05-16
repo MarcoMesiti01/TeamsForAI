@@ -1,8 +1,16 @@
 # Environments
 .env
+.env.*
+!.env.example
 venv/
 env/
 ENV/
 
 #Libraries
 node_modules/
+
+# Local logs and runtime output
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

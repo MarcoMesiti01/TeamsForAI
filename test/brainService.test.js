@@ -35,6 +35,9 @@ test("brain returns spoken summary, reasoning summary, board operations, and und
   assert.ok(result.board_operations.length >= 3);
   assert.equal(typeof result.undo_checkpoint_id, "string");
   assert.equal(state.board.undo_stack.at(-1).checkpoint_id, result.undo_checkpoint_id);
+  assert.equal(result.board_context.version, 0);
+  assert.equal(Array.isArray(result.board_context.nodes), true);
+  assert.equal(typeof result.layout_notes, "string");
 });
 
 test("brain keeps deterministic board labels in the detected request language", async () => {

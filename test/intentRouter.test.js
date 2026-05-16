@@ -87,6 +87,8 @@ test("passes compact conversation context and current board snapshot to orchestr
   assert.equal(seenInput.current_user_turn, "Where should we expand this next?");
   assert.match(seenInput.compact_conversation_context, /buyer discovery/);
   assert.equal(seenInput.current_board_snapshot.nodes[0].text, "Existing board topic");
+  assert.equal(seenInput.current_board_context.nodes[0].title, "Existing board topic");
+  assert.equal(seenInput.current_board_context.version, board.version);
   assert.ok(seenInput.available_capabilities.artifacts.includes("idea_map"));
 });
 

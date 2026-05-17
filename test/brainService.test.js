@@ -62,3 +62,33 @@ test("brain keeps deterministic board labels in the detected request language", 
 
   assert.ok(nodeTexts.includes("Obiettivo utente"));
 });
+
+test("brain uses whiteboard planner for board-first process flow intents", async () => {
+  const state = {
+    last_task_type: "general",
+    last_user_goal: "",
+    board: createBoardState(),
+  };
+
+  const result = await delegateToBrain({
+    intent_type: "develop_idea_map",
+    user_goal: "Describe the onboarding process for a new customer",
+    artifact_type: "process_flow",
+    target_artifact: "process_flow",
+    should_use_whiteboard: true,
+    route_action: "use_whiteboard",
+    board_strategy: "create_new_group",
+    visual_summary_goal: "Show onboarding as ordered steps.",
+    reason: "A process flow should be summarized visually.",
+    required_context: [],
+    known_context: "",
+    missing_info: [],
+    confidence: 0.86,
+  }, state);
+
+  assert.equal(result.handled_by, "brain");
+  assert.equal(result.board_state.nodes.length >= 4, true);
+  assert.ok(result.board_operations.some((operation) => operation.type === "create_edge"));
+  assert.match(result.layout_notes, /process/i);
+  assert.equal(typeof result.undo_checkpoint_id, "string");
+});

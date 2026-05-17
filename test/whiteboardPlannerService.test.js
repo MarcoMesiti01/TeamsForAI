@@ -30,6 +30,22 @@ test("builds planner input with board snapshot, supported operations, layout con
   assert.match(input.compact_session_context, /top-left/);
 });
 
+test("planner input includes board strategy and visual summary goal", () => {
+  const board = createBoardState();
+  const input = buildWhiteboardPlanInput({
+    intent_type: "develop_idea_map",
+    user_goal: "Describe the onboarding process",
+    target_artifact: "process_flow",
+    artifact_type: "process_flow",
+    board_strategy: "create_new_group",
+    visual_summary_goal: "Show onboarding as ordered steps.",
+  }, board);
+
+  assert.equal(input.artifact_type, "process_flow");
+  assert.equal(input.board_strategy, "create_new_group");
+  assert.equal(input.visual_summary_goal, "Show onboarding as ordered steps.");
+});
+
 test("planner uses strict JSON planner output when operations validate", async () => {
   const board = createBoardState();
   const plan = await planWhiteboardOperations({
@@ -79,4 +95,33 @@ test("planner falls back to fixture when planner output has invalid operations",
   assert.equal(plan.board_operations.length, 9);
   assert.equal(plan.validation_warnings.length, 1);
   assert.match(plan.validation_warnings[0], /missing node references/);
+});
+
+test("fallback planner creates valid operation batches for core artifact types", async () => {
+  const artifacts = [
+    ["idea_map", "Map the core idea for a whiteboard"],
+    ["process_flow", "Describe the customer onboarding process"],
+    ["architecture_map", "Design the architecture for the voice AI whiteboard"],
+    ["comparison_map", "Compare enterprise pilots and self serve launch paths"],
+    ["action_plan", "Make an action plan for the next two weeks"],
+  ];
+
+  for (const [artifactType, userGoal] of artifacts) {
+    const board = createBoardState();
+    const plan = await planWhiteboardOperations({
+      intent_type: "develop_idea_map",
+      user_goal: userGoal,
+      artifact_type: artifactType,
+      target_artifact: artifactType,
+      should_use_whiteboard: true,
+      board_strategy: "create_new_group",
+      visual_summary_goal: `Create a ${artifactType}`,
+    }, board, { apiKey: "" });
+
+    assert.equal(plan.used_fallback, true, `${artifactType} should use fallback without an API key`);
+    assert.equal(plan.artifact_type, artifactType);
+    assert.equal(plan.validation_warnings.length, 0, `${artifactType} should validate cleanly`);
+    assert.ok(plan.board_operations.some((operation) => operation.type === "create_node"), `${artifactType} should create nodes`);
+    assert.ok(plan.board_operations.some((operation) => operation.type === "create_group"), `${artifactType} should create a group`);
+  }
 });

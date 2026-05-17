@@ -11,6 +11,8 @@ function modelDecision(overrides = {}) {
     artifact_type: "idea_map",
     should_use_whiteboard: true,
     route_action: "use_whiteboard",
+    board_strategy: "create_new_group",
+    visual_summary_goal: "Map the user's thinking into a compact board artifact.",
     reason: "The user is asking for multi-part product thinking that benefits from a spatial artifact.",
     confidence: 0.91,
     required_context: [],
@@ -35,6 +37,8 @@ test("routes founder idea-map requests from orchestrator JSON", async () => {
   assert.equal(intent.target_artifact, "idea_map");
   assert.equal(intent.should_use_whiteboard, true);
   assert.equal(intent.route_action, "use_whiteboard");
+  assert.equal(intent.board_strategy, "create_new_group");
+  assert.match(intent.visual_summary_goal, /compact board artifact/);
   assert.equal(intent.user_goal, "Help me map an AI whiteboard product for startup founders");
   assert.deepEqual(intent.required_context, []);
   assert.equal(typeof intent.reason, "string");
@@ -51,6 +55,8 @@ test("keeps casual conversation off the board when orchestrator says conversatio
       artifact_type: "conversation",
       should_use_whiteboard: false,
       route_action: "answer_conversationally",
+      board_strategy: "no_board",
+      visual_summary_goal: "",
       reason: "This is a casual greeting and does not need a persistent artifact.",
       confidence: 0.88,
       tool_plan: [],
@@ -61,6 +67,105 @@ test("keeps casual conversation off the board when orchestrator says conversatio
   assert.equal(intent.artifact_type, "conversation");
   assert.equal(intent.target_artifact, "conversation");
   assert.equal(intent.should_use_whiteboard, false);
+  assert.equal(intent.board_strategy, "no_board");
+});
+
+test("fallback routes process descriptions to a process flow board artifact", async () => {
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  try {
+    delete process.env.OPENAI_API_KEY;
+
+    const intent = await routeUserIntent({
+      user_goal: "Describe the onboarding process for a new customer",
+    });
+
+    assert.equal(intent.should_use_whiteboard, true);
+    assert.equal(intent.artifact_type, "process_flow");
+    assert.equal(intent.target_artifact, "process_flow");
+    assert.equal(intent.board_strategy, "create_new_group");
+    assert.equal(intent.route_action, "use_whiteboard");
+    assert.equal(intent.tool_plan[0].tool, "submit_whiteboard_command");
+    assert.equal(intent.board_command.command_type, "create_artifact");
+    assert.match(intent.visual_summary_goal, /onboarding process/i);
+  } finally {
+    if (previousApiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousApiKey;
+    }
+  }
+});
+
+test("fallback routes architecture, comparison, and action plan requests to board artifacts", async () => {
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  try {
+    delete process.env.OPENAI_API_KEY;
+
+    const architecture = await routeUserIntent({ user_goal: "Design the architecture for the voice AI whiteboard" });
+    const comparison = await routeUserIntent({ user_goal: "Compare enterprise pilots and self serve launch paths" });
+    const actionPlan = await routeUserIntent({ user_goal: "Make an action plan for the next two weeks" });
+
+    assert.equal(architecture.artifact_type, "architecture_map");
+    assert.equal(architecture.should_use_whiteboard, true);
+    assert.equal(comparison.artifact_type, "comparison_map");
+    assert.equal(comparison.should_use_whiteboard, true);
+    assert.equal(actionPlan.artifact_type, "action_plan");
+    assert.equal(actionPlan.should_use_whiteboard, true);
+  } finally {
+    if (previousApiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousApiKey;
+    }
+  }
+});
+
+test("fallback keeps casual chat off the board and supports multilingual board-first requests", async () => {
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  try {
+    delete process.env.OPENAI_API_KEY;
+
+    const casual = await routeUserIntent({ user_goal: "Good morning, how are you?" });
+    const italianProcess = await routeUserIntent({ user_goal: "Descrivi il processo di approvazione dei rimborsi" });
+
+    assert.equal(casual.should_use_whiteboard, false);
+    assert.equal(casual.artifact_type, "conversation");
+    assert.equal(casual.board_strategy, "no_board");
+    assert.equal(italianProcess.should_use_whiteboard, true);
+    assert.equal(italianProcess.artifact_type, "process_flow");
+  } finally {
+    if (previousApiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousApiKey;
+    }
+  }
+});
+
+test("fallback chooses refine strategy for related board follow-ups", async () => {
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  const board = createBoardState();
+  applyBoardOperations(board, [
+    { type: "create_node", id: "node-onboarding", text: "Customer onboarding", x: 10, y: 20 },
+  ]);
+
+  try {
+    delete process.env.OPENAI_API_KEY;
+
+    const intent = await routeUserIntent({
+      user_goal: "Refine this and add the missing approval step",
+      visible_board_context: "Board shows customer onboarding.",
+    }, { board });
+
+    assert.equal(intent.should_use_whiteboard, true);
+    assert.equal(intent.board_strategy, "refine_existing");
+  } finally {
+    if (previousApiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousApiKey;
+    }
+  }
 });
 
 test("passes compact conversation context and current board snapshot to orchestrator", async () => {

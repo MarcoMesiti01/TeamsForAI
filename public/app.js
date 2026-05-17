@@ -1,4 +1,5 @@
 const modelInput = document.getElementById("modelInput");
+const voiceSelect = document.getElementById("voiceSelect");
 const connectBtn = document.getElementById("connectBtn");
 const disconnectBtn = document.getElementById("disconnectBtn");
 const micBtn = document.getElementById("micBtn");
@@ -20,6 +21,9 @@ const NODE_WIDTH = 210;
 const NODE_HEIGHT = 112;
 let currentBoardState = { version: 0, nodes: [], edges: [], groups: [], can_undo: false };
 let dragState = null;
+const pendingWhiteboardJobs = new Set();
+const completedWhiteboardJobs = new Set();
+let boardJobPollTimer = null;
 
 function setStatus(text) {
   statusEl.textContent = `Status: ${text}`;
@@ -36,6 +40,56 @@ function appendLine(role, text) {
 
 function appendDebug(text) {
   appendLine("system", `[debug] ${text}`);
+}
+
+function trackWhiteboardJob(job) {
+  if (!job?.job_id) return;
+  pendingWhiteboardJobs.add(job.job_id);
+  setStatus("updating board...");
+  appendLine("system", job.spoken_ack || "Updating board...");
+  startBoardJobPolling();
+}
+
+function startBoardJobPolling() {
+  if (boardJobPollTimer) return;
+  boardJobPollTimer = window.setInterval(pollWhiteboardJobs, 900);
+  void pollWhiteboardJobs();
+}
+
+function stopBoardJobPollingIfIdle() {
+  if (pendingWhiteboardJobs.size || !boardJobPollTimer) return;
+  window.clearInterval(boardJobPollTimer);
+  boardJobPollTimer = null;
+  setStatus(dc?.readyState === "open" ? "connected" : "idle");
+}
+
+async function pollWhiteboardJobs() {
+  if (!pendingWhiteboardJobs.size) {
+    stopBoardJobPollingIfIdle();
+    return;
+  }
+
+  try {
+    const resp = await fetch(`/board/jobs?client_session_id=${encodeURIComponent(clientSessionId)}`);
+    const output = await resp.json();
+    (output.jobs || []).forEach((job) => {
+      if (!pendingWhiteboardJobs.has(job.job_id)) return;
+      if (job.status === "completed") {
+        pendingWhiteboardJobs.delete(job.job_id);
+        completedWhiteboardJobs.add(job.job_id);
+        if (job.board_state) renderBoard(job.board_state);
+        appendLine("system", job.spoken_summary || "Board updated.");
+      }
+      if (job.status === "failed" || job.status === "needs_clarification") {
+        pendingWhiteboardJobs.delete(job.job_id);
+        appendLine("system", job.error || job.spoken_summary || "Board update needs clarification.");
+      }
+    });
+  } catch (error) {
+    appendLine("system", `Board job polling failed: ${error.message}`);
+  } finally {
+    stopBoardJobPollingIfIdle();
+  }
 }
 
 function getBoardSize(boardState) {
@@ -245,26 +299,6 @@ function upsertTranscriptItem(itemId, role, text) {
   }
 }
 
-async function getEphemeralKey(model) {
-  const resp = await fetch("/session", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model }),
-  });
-
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data?.error || "Unable to create realtime session");
-  }
-
-  const token = data?.client_secret?.value;
-  if (!token) {
-    throw new Error("No ephemeral key returned from backend");
-  }
-
-  return { token, model: data.model };
-}
-
 function bindDataChannel(channel) {
   channel.onopen = () => {
     setStatus("connected");
@@ -369,7 +403,11 @@ async function executeToolCall(name, rawArguments, callId) {
       renderBoard(output.board_state);
     }
 
-    if (name === "delegate_to_orchestrator" || name === "route_user_intent" || name === "delegate_to_brain") {
+    if (output?.whiteboard_job) {
+      trackWhiteboardJob(output.whiteboard_job);
+    }
+
+    if (name === "delegate_to_orchestrator" || name === "route_user_intent" || name === "delegate_to_brain" || name === "submit_whiteboard_command") {
       appendDebug(`handled_by=${output?.handled_by || "unknown"}`);
       if (output?.intent?.intent_type) {
         appendDebug(`intent=${output.intent.intent_type}`);
@@ -471,15 +509,12 @@ async function finishNodeDrag(event) {
 
 async function connect() {
   const modelOverride = modelInput.value.trim();
+  const voice = voiceSelect.value.trim();
 
   connectBtn.disabled = true;
   setStatus("connecting...");
 
   try {
-    const session = await getEphemeralKey(modelOverride);
-    const ephemeralKey = session.token;
-    const selectedModel = session.model || modelOverride;
-
     pc = new RTCPeerConnection();
     audioEl = document.createElement("audio");
     audioEl.autoplay = true;
@@ -497,14 +532,22 @@ async function connect() {
 
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
+    const localSdp = pc.localDescription?.sdp || offer.sdp;
+    if (!localSdp) {
+      throw new Error("Browser did not create a local WebRTC offer.");
+    }
+    appendDebug(`local SDP length=${localSdp.length}`);
 
-    const sdpResp = await fetch(`https://api.openai.com/v1/realtime?model=${encodeURIComponent(selectedModel)}`, {
+    const params = new URLSearchParams();
+    if (modelOverride) params.set("model", modelOverride);
+    if (voice) params.set("voice", voice);
+
+    const sdpResp = await fetch(`/session?${params.toString()}`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${ephemeralKey}`,
         "Content-Type": "application/sdp",
       },
-      body: offer.sdp,
+      body: localSdp,
     });
 
     if (!sdpResp.ok) {
@@ -519,7 +562,7 @@ async function connect() {
     micBtn.disabled = false;
     micEnabled = true;
     micBtn.textContent = "Mute Mic";
-    appendLine("system", `Connected using model: ${selectedModel}`);
+    appendLine("system", `Connected using model: ${sdpResp.headers.get("X-Realtime-Model") || modelOverride || "backend default"} and voice: ${sdpResp.headers.get("X-Realtime-Voice") || voice}`);
   } catch (err) {
     appendLine("system", `Connection failed: ${err.message}`);
     setStatus("error");

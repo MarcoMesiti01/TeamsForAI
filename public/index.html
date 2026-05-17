@@ -7,23 +7,7 @@
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <main class="container">
-      <h1>TeamsForAI Whiteboard</h1>
-      <p class="muted">Speak ideas into a structured map, then reshape the board directly.</p>
-
-      <section class="panel controls">
-        <label for="modelInput">Model</label>
-        <input id="modelInput" type="text" placeholder="Backend default realtime model" />
-
-        <div class="row">
-          <button id="connectBtn">Connect</button>
-          <button id="disconnectBtn" disabled>Disconnect</button>
-          <button id="micBtn" disabled>Mute Mic</button>
-        </div>
-
-        <p id="status" class="status">Status: idle</p>
-      </section>
-
+    <main class="app-shell">
       <section class="panel transcript-panel">
         <h2>Transcript</h2>
         <div id="transcript" class="transcript"></div>
@@ -35,11 +19,48 @@
             <h2>Idea Map</h2>
             <p class="muted">AI-created cards, groups, and arrows become a draggable structured map.</p>
           </div>
-          <button id="undoBtn" disabled>Undo</button>
         </div>
         <div id="boardStatus" class="status">Board version: 0</div>
         <div id="board" class="board"></div>
       </section>
+
+      <aside class="command-pane" aria-label="Whiteboard controls">
+        <div class="brand-block">
+          <h1>TeamsForAI Whiteboard</h1>
+          <p class="muted">Speak ideas into a structured map, then reshape the board directly.</p>
+        </div>
+
+        <section class="settings-block" aria-label="Realtime settings">
+          <label for="modelInput">Realtime model</label>
+          <select id="modelInput">
+            <option value="">Backend default</option>
+            <option value="gpt-realtime">gpt-realtime</option>
+            <option value="gpt-4o-realtime-preview">gpt-4o realtime</option>
+            <option value="gpt-4o-mini-realtime-preview">gpt-4o mini realtime</option>
+          </select>
+
+          <label for="voiceSelect">Voice</label>
+          <select id="voiceSelect">
+            <option value="alloy">Alloy</option>
+            <option value="ash">Ash</option>
+            <option value="ballad">Ballad</option>
+            <option value="coral">Coral</option>
+            <option value="echo">Echo</option>
+            <option value="sage">Sage</option>
+            <option value="shimmer">Shimmer</option>
+            <option value="verse">Verse</option>
+          </select>
+        </section>
+
+        <div class="command-stack">
+          <button id="connectBtn">Connect</button>
+          <button id="disconnectBtn" disabled>Disconnect</button>
+          <button id="micBtn" disabled>Mute Mic</button>
+          <button id="undoBtn" disabled>Undo</button>
+        </div>
+
+        <p id="status" class="status">Status: idle</p>
+      </aside>
     </main>
 
     <script src="/app.js"></script>

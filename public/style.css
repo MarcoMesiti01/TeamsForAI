@@ -278,13 +278,27 @@ body {
   font-weight: 700;
 }
 
-input {
+.settings-block {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.settings-block label:not(:first-child) {
+  margin-top: 0.45rem;
+}
+
+input,
+select {
   width: 100%;
   border-radius: 8px;
   border: 1px solid rgba(95, 111, 132, 0.28);
   background: #ffffff;
   color: #172033;
   padding: 0.6rem 0.7rem;
+}
+
+select {
+  min-height: 40px;
 }
 
 .command-stack {

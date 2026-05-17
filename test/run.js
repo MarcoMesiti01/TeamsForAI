@@ -3,5 +3,8 @@ require("./intentRouter.test");
 require("./boardState.test");
 require("./boardContext.test");
 require("./boardOperationValidator.test");
+require("./whiteboardCommandService.test");
 require("./whiteboardPlannerService.test");
+require("./whiteboardJobService.test");
 require("./brainService.test");
+require("./frontendLayout.test");

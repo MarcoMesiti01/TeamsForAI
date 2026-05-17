@@ -5,8 +5,8 @@
   "description": "Simple localhost OpenAI Realtime voice + transcript demo",
   "main": "server.js",
   "scripts": {
-    "dev": "node server.js",
-    "start": "node server.js",
+    "dev": "node --use-system-ca server.js",
+    "start": "node --use-system-ca server.js",
     "test": "node test/run.js"
   },
   "dependencies": {

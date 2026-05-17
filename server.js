@@ -4,13 +4,17 @@ require("dotenv").config({ path: path.join(__dirname, ".env"), override: true })
 const { delegateToBrain } = require("./lib/brainService");
 const { routeUserIntent } = require("./lib/intentRouter");
 const { createBoardState, applyBoardOperations, getBoardSnapshot, undoLastCheckpoint } = require("./lib/boardState");
+const { buildWhiteboardCommandFromIntent } = require("./lib/whiteboardCommandService");
+const { createWhiteboardJob, listWhiteboardJobs } = require("./lib/whiteboardJobService");
 const { MODEL_ROLES, selectModel } = require("./lib/modelPolicy");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const sessionStateStore = new Map();
+const REALTIME_VOICES = new Set(["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]);
 
+app.use(express.text({ type: ["application/sdp", "text/plain"] }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -65,6 +69,39 @@ const TOOL_DEFINITIONS = [
   },
   {
     type: "function",
+    name: "submit_whiteboard_command",
+    description:
+      "Queue a typed whiteboard command without blocking speech. Use for direct board edits: create, modify, connect, group, reorganize, emphasize, move, or delete.",
+    parameters: {
+      type: "object",
+      properties: {
+        command_type: {
+          type: "string",
+          description: "create_artifact, modify_item, move_item, connect_items, group_items, reorganize_artifact, emphasize_item, delete_item, or replace_artifact.",
+        },
+        artifact_type: {
+          type: "string",
+          description: "idea_map, process_flow, architecture_map, comparison_map, action_plan, or board.",
+        },
+        user_goal: { type: "string" },
+        target_selector: {
+          type: "object",
+          additionalProperties: true,
+        },
+        target_confidence: { type: "number" },
+        change_description: { type: "string" },
+        constraints: {
+          type: "object",
+          additionalProperties: true,
+        },
+        allow_destructive: { type: "boolean" },
+      },
+      required: ["command_type", "artifact_type", "user_goal", "target_selector", "target_confidence", "change_description", "constraints", "allow_destructive"],
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
     name: "undo_board_operation",
     description: "Undo the last applied board operation checkpoint.",
     parameters: {
@@ -80,6 +117,8 @@ const TOOLING_INSTRUCTIONS = [
   "Your job is low-latency voice UX: turn-taking, interruptions, and concise spoken replies.",
   "Answer directly for short conversational responses, greetings, and simple factual replies that do not need persistent shared context.",
   "Call delegate_to_orchestrator when the user is externalizing thought, comparing options, designing, planning, mapping relationships, or needs persistent shared context.",
+  "Call submit_whiteboard_command directly when the user gives a specific board edit, such as changing, connecting, moving, grouping, emphasizing, or deleting a board item.",
+  "For board work, acknowledge quickly; the backend queues the visual update and the browser shows it when ready.",
   "Ask a brief clarification yourself when the artifact goal is ambiguous enough that delegation would not have a clear target.",
   "Do not decide board layout, whiteboard structure, or spatial placement yourself; pass intent-level context to the orchestrator instead.",
   "Keep undo_board_operation as a direct deterministic UI action, and call it when the user asks to undo, go back, or revert the last board change.",
@@ -109,7 +148,34 @@ app.post("/session", async (req, res) => {
       });
     }
 
-    const frontendModelOverride = String(req.body?.model || "").trim();
+    const sdpOffer = typeof req.body === "string" ? req.body : "";
+    const sdpPreview = sdpOffer.split(/\r?\n/, 1)[0] || "";
+    if (!sdpOffer.trim()) {
+      return res.status(400).json({
+        error: "Missing WebRTC SDP offer.",
+        debug: {
+          content_type: req.get("content-type") || "",
+          content_length: req.get("content-length") || "",
+          body_type: typeof req.body,
+        },
+      });
+    }
+
+    if (!sdpOffer.startsWith("v=0")) {
+      return res.status(400).json({
+        error: "Invalid WebRTC SDP offer: expected the body to start with v=0.",
+        debug: {
+          sdp_length: sdpOffer.length,
+          sdp_first_line: sdpPreview,
+          content_type: req.get("content-type") || "",
+          content_length: req.get("content-length") || "",
+        },
+      });
+    }
+
+    const frontendModelOverride = String(req.query?.model || "").trim();
+    const requestedVoice = String(req.query?.voice || "").trim();
+    const selectedVoice = REALTIME_VOICES.has(requestedVoice) ? requestedVoice : "alloy";
     const selectedModel = frontendModelOverride || selectModel({
       role: MODEL_ROLES.realtime_controller,
       complexity: "low",
@@ -117,36 +183,47 @@ app.post("/session", async (req, res) => {
       artifact_type: "conversation",
     }).model;
 
-    const response = await fetch("https://api.openai.com/v1/realtime/sessions", {
+    const sessionConfig = JSON.stringify({
+      type: "realtime",
+      model: selectedModel,
+      audio: { output: { voice: selectedVoice } },
+      tools: TOOL_DEFINITIONS,
+      instructions: TOOLING_INSTRUCTIONS,
+    });
+    const formData = new FormData();
+    formData.set("sdp", sdpOffer);
+    formData.set("session", sessionConfig);
+
+    const response = await fetch("https://api.openai.com/v1/realtime/calls", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        model: selectedModel,
-        voice: "alloy",
-        tools: TOOL_DEFINITIONS,
-        instructions: TOOLING_INSTRUCTIONS,
-      }),
+      body: formData,
     });
 
-    const data = await response.json();
+    const responseText = await response.text();
 
     if (!response.ok) {
       return res.status(response.status).json({
-        error: data?.error?.message || "Failed to create realtime session.",
-        details: data,
+        error: "Failed to create realtime call.",
+        details: responseText,
+        debug: {
+          sdp_length: sdpOffer.length,
+          sdp_first_line: sdpPreview,
+          content_type: req.get("content-type") || "",
+          content_length: req.get("content-length") || "",
+        },
       });
     }
 
-    return res.json({
-      client_secret: data.client_secret,
-      model: selectedModel,
-    });
+    res.setHeader("Content-Type", "application/sdp");
+    res.setHeader("X-Realtime-Model", selectedModel);
+    res.setHeader("X-Realtime-Voice", selectedVoice);
+    return res.send(responseText);
   } catch (error) {
     return res.status(500).json({
-      error: "Unexpected server error while creating realtime session.",
+      error: "Unexpected server error while creating realtime call.",
       details: error.message,
     });
   }
@@ -174,12 +251,57 @@ app.post("/tools/execute", async (req, res) => {
             selected_item: state.selected_item,
             recently_moved_item: state.recently_moved_item,
           });
+      if (toolName !== "delegate_to_brain" && intent.should_use_whiteboard === true) {
+        const command = intent.board_command || buildWhiteboardCommandFromIntent(intent);
+        const job = createWhiteboardJob(state, command);
+        sessionStateStore.set(clientSessionId, state);
+        return res.json({
+          handled_by: "whiteboard_job",
+          spoken_summary: job.spoken_ack,
+          full_response: "Whiteboard update queued.",
+          reasoning_summary: intent.reason,
+          missing_info: [],
+          board_operations: [],
+          undo_checkpoint_id: null,
+          intent,
+          whiteboard_job: {
+            job_id: job.job_id,
+            status: job.status,
+            spoken_ack: job.spoken_ack,
+          },
+          board_state: getBoardSnapshot(state.board),
+        });
+      }
       const result = await delegateToBrain(intent, state);
       sessionStateStore.set(clientSessionId, state);
       return res.json({
         ...result,
         intent,
         board_state: result.board_state || getBoardSnapshot(state.board),
+      });
+    }
+
+    if (toolName === "submit_whiteboard_command") {
+      const state = getSessionState(clientSessionId);
+      const job = createWhiteboardJob(state, {
+        ...toolArgs,
+        user_goal: toolArgs.user_goal || toolArgs.change_description || "Update the whiteboard",
+      });
+      sessionStateStore.set(clientSessionId, state);
+      return res.json({
+        handled_by: "whiteboard_job",
+        spoken_summary: job.spoken_ack,
+        full_response: "Whiteboard update queued.",
+        reasoning_summary: "The realtime controller submitted a direct whiteboard command.",
+        missing_info: [],
+        board_operations: [],
+        undo_checkpoint_id: null,
+        whiteboard_job: {
+          job_id: job.job_id,
+          status: job.status,
+          spoken_ack: job.spoken_ack,
+        },
+        board_state: getBoardSnapshot(state.board),
       });
     }
 
@@ -212,6 +334,36 @@ app.get("/board/state", (req, res) => {
   const clientSessionId = req.query?.client_session_id || "default";
   const state = getSessionState(clientSessionId);
   return res.json(getBoardSnapshot(state.board));
+});
+
+app.post("/board/commands", (req, res) => {
+  try {
+    const clientSessionId = req.body?.client_session_id || "default";
+    const state = getSessionState(clientSessionId);
+    const job = createWhiteboardJob(state, req.body?.command || req.body || {});
+    sessionStateStore.set(clientSessionId, state);
+    return res.status(202).json({
+      ok: true,
+      job_id: job.job_id,
+      status: job.status,
+      spoken_ack: job.spoken_ack,
+      board_state: getBoardSnapshot(state.board),
+    });
+  } catch (error) {
+    return res.status(400).json({
+      ok: false,
+      error: error.message,
+    });
+  }
+});
+
+app.get("/board/jobs", (req, res) => {
+  const clientSessionId = req.query?.client_session_id || "default";
+  const state = getSessionState(clientSessionId);
+  return res.json({
+    jobs: listWhiteboardJobs(state),
+    board_state: getBoardSnapshot(state.board),
+  });
 });
 
 app.post("/board/operations", (req, res) => {

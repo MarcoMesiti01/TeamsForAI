@@ -269,3 +269,46 @@ test("invalid operation in a batch leaves workspace completely unchanged", () =>
   assert.deepEqual(getWorkspaceSnapshot(workspace), before);
   assert.deepEqual(workspace.undo_stack, []);
 });
+
+test("rejects invalid remove entry fields without changing the active entry", () => {
+  const workspace = createReasoningWorkspace();
+  applyWorkspaceOperations(workspace, [{
+    type: "add_entry",
+    id: "entry-to-keep",
+    category: "constraints",
+    content: "Keep this active",
+    origin: "user_stated",
+    source_turn_id: "turn-1",
+  }]);
+
+  const invalidRemovals = [
+    [{
+      type: "remove_entry",
+      id: "entry-to-keep",
+      category: "risks",
+      content: "Keep this active",
+      origin: "user_stated",
+    }, /Unsupported workspace category/],
+    [{
+      type: "remove_entry",
+      id: "entry-to-keep",
+      category: "constraints",
+      content: "Keep this active",
+      origin: "imported",
+    }, /Unsupported workspace origin/],
+    [{
+      type: "remove_entry",
+      id: "entry-to-keep",
+      category: "constraints",
+      content: "  ",
+      origin: "user_stated",
+    }, /Workspace entry content is required/],
+  ];
+
+  invalidRemovals.forEach(([operation, expectedError]) => {
+    const before = getWorkspaceSnapshot(workspace);
+    assert.throws(() => applyWorkspaceOperations(workspace, [operation]), expectedError);
+    assert.deepEqual(getWorkspaceSnapshot(workspace), before);
+    assert.equal(getWorkspaceSnapshot(workspace).entries[0].status, "active");
+  });
+});

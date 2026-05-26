@@ -8,6 +8,7 @@ ENV/
 
 #Libraries
 node_modules/
+.worktrees/
 
 # Local logs and runtime output
 *.log

@@ -73,6 +73,12 @@ Implement milestone 1 from `docs/superpowers/specs/2026-05-26-voice-reasoning-wo
 - Create: `test/reasoningWorkspace.test.js`
 - Modify: `test/run.js`
 
+**Corrected state contract:**
+
+- `add_entry.id` and replacement IDs for `correct_entry` / `supersede_entry` are required non-empty strings supplied by the caller. Only internal checkpoint IDs are generated.
+- Reasoning undo targets the most recent batch containing a committed-workspace mutation (`add_entry`, `correct_entry`, `supersede_entry`, or `remove_entry`). Working-memory-only batches update state and the log but do not occupy reasoning undo.
+- Undo restores committed entries only; it leaves the current working-memory layer intact. Operation-log and public workspace versions remain strictly monotonic through undo and later operations.
+
 - [ ] **Step 1: Register and write failing workspace state tests**
 
 Append the test import to `test/run.js`:
@@ -144,16 +150,20 @@ test("correction preserves the old entry and creates an active replacement", () 
   assert.equal(snapshot.entries.find((entry) => entry.id === "entry-b").supersedes_id, "entry-a");
 });
 
-test("undo restores authoritative entries without erasing history", () => {
+test("undo restores authoritative entries while retaining current working memory", () => {
   const workspace = createReasoningWorkspace();
   applyWorkspaceOperations(workspace, [
     { type: "add_entry", id: "entry-decision", category: "decisions", content: "Choose option A", origin: "ai_inferred", source_turn_id: "turn-1" },
+  ]);
+  applyWorkspaceOperations(workspace, [
+    { type: "update_working_memory", summary: "Continue comparing alternatives" },
   ]);
 
   const undo = undoLastWorkspaceCheckpoint(workspace);
 
   assert.equal(undo.ok, true);
   assert.equal(undo.workspace_state.entries.length, 0);
+  assert.equal(undo.workspace_state.working_memory.summary, "Continue comparing alternatives");
   assert.equal(workspace.operation_log.at(-1).type, "undo");
 });
 ```
@@ -177,6 +187,9 @@ const ORIGINS = new Set(["user_stated", "ai_inferred"]);
 const OPERATION_TYPES = new Set([
   "update_working_memory", "add_entry", "correct_entry",
   "supersede_entry", "remove_entry",
+]);
+const COMMITTED_OPERATION_TYPES = new Set([
+  "add_entry", "correct_entry", "supersede_entry", "remove_entry",
 ]);
 
 function clone(value) {
@@ -213,8 +226,6 @@ function makeId(prefix) {
 
 function stateSnapshot(workspace) {
   return {
-    version: workspace.version,
-    working_memory: clone(workspace.working_memory),
     entries: clone(workspace.entries),
   };
 }
@@ -230,8 +241,9 @@ function applyOperation(workspace, operation) {
   }
   const entry = workspace.entries.find((candidate) => candidate.id === operation.id);
   if (operation.type === "add_entry") {
+    if (typeof operation.id !== "string" || !operation.id.trim()) throw new Error("Workspace entry id is required.");
     workspace.entries.push({
-      id: operation.id || makeId("entry"),
+      id: operation.id,
       category: operation.category,
       content: String(operation.content).trim(),
       origin: operation.origin,
@@ -246,9 +258,10 @@ function applyOperation(workspace, operation) {
     entry.status = "removed";
     return;
   }
+  if (typeof operation.replacement_id !== "string" || !operation.replacement_id.trim()) throw new Error("Workspace replacement_id is required.");
   entry.status = operation.type === "correct_entry" ? "corrected" : "superseded";
   workspace.entries.push({
-    id: operation.replacement_id || makeId("entry"),
+    id: operation.replacement_id,
     category: operation.category,
     content: String(operation.content).trim(),
     origin: operation.origin,
@@ -280,7 +293,9 @@ function applyWorkspaceOperations(workspace, operations = [], metadata = {}) {
       applied_at: new Date().toISOString(),
     });
   });
-  workspace.undo_stack.push({ checkpoint_id: checkpointId, snapshot: before });
+  if (operations.some((operation) => COMMITTED_OPERATION_TYPES.has(operation.type))) {
+    workspace.undo_stack.push({ checkpoint_id: checkpointId, snapshot: before });
+  }
   return { ok: true, workspace_state: getWorkspaceSnapshot(workspace), undo_checkpoint_id: checkpointId };
 }
 
@@ -289,8 +304,6 @@ function undoLastWorkspaceCheckpoint(workspace) {
   if (!checkpoint) {
     return { ok: false, error: "Nothing to undo.", workspace_state: getWorkspaceSnapshot(workspace) };
   }
-  workspace.version = checkpoint.snapshot.version;
-  workspace.working_memory = clone(checkpoint.snapshot.working_memory);
   workspace.entries = clone(checkpoint.snapshot.entries);
   workspace.version += 1;
   workspace.operation_log.push({

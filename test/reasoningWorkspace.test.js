@@ -167,7 +167,7 @@ test("supersedes active content and removes active content while preserving entr
   assert.equal(snapshot.entries.find((entry) => entry.id === "question-a").status, "removed");
 });
 
-test("undo restores working memory and authoritative entries without erasing log history", () => {
+test("undo restores authoritative entries while retaining current working memory and log history", () => {
   const workspace = createReasoningWorkspace();
   applyWorkspaceOperations(workspace, [
     {
@@ -200,11 +200,32 @@ test("undo restores working memory and authoritative entries without erasing log
   const undo = undoLastWorkspaceCheckpoint(workspace);
 
   assert.equal(undo.ok, true);
-  assert.equal(undo.workspace_state.working_memory.summary, "Original summary");
+  assert.equal(undo.workspace_state.working_memory.summary, "Changed summary");
   assert.equal(undo.workspace_state.entries[0].status, "active");
   assert.equal(workspace.operation_log.length, logLengthBeforeUndo + 1);
   assert.equal(workspace.operation_log.at(-1).type, "undo");
   assert.equal(undo.undone_checkpoint_id, workspace.operation_log.at(-1).checkpoint_id);
+});
+
+test("working-memory-only updates do not displace the latest committed reasoning undo", () => {
+  const workspace = createReasoningWorkspace();
+  applyWorkspaceOperations(workspace, [{
+    type: "add_entry",
+    id: "entry-to-undo",
+    category: "decisions",
+    content: "Select option A",
+    origin: "user_stated",
+  }]);
+  applyWorkspaceOperations(workspace, [{
+    type: "update_working_memory",
+    summary: "Keep evaluating current trade-offs",
+  }]);
+
+  const undo = undoLastWorkspaceCheckpoint(workspace);
+
+  assert.equal(undo.ok, true);
+  assert.deepEqual(undo.workspace_state.entries, []);
+  assert.equal(undo.workspace_state.working_memory.summary, "Keep evaluating current trade-offs");
 });
 
 test("undo reports a snapshot when no checkpoint exists", () => {
@@ -397,6 +418,23 @@ test("requires a caller supplied stable id when adding an entry", () => {
   assert.deepEqual(getWorkspaceSnapshot(workspace).entries, []);
 });
 
+test("rejects non-string and blank add entry identifiers", () => {
+  [42, "   "].forEach((id) => {
+    const workspace = createReasoningWorkspace();
+    assert.throws(
+      () => applyWorkspaceOperations(workspace, [{
+        type: "add_entry",
+        id,
+        category: "problem",
+        content: "Define the problem",
+        origin: "user_stated",
+      }]),
+      /Workspace entry id is required/
+    );
+    assert.deepEqual(getWorkspaceSnapshot(workspace).entries, []);
+  });
+});
+
 ["correct_entry", "supersede_entry"].forEach((type) => {
   test(`requires a caller supplied replacement id for ${type}`, () => {
     const workspace = createReasoningWorkspace();
@@ -420,6 +458,33 @@ test("requires a caller supplied stable id when adding an entry", () => {
       /Workspace replacement_id is required/
     );
     assert.deepEqual(getWorkspaceSnapshot(workspace), before);
+  });
+
+  test(`rejects non-string and blank replacement ids for ${type}`, () => {
+    [7, "  "].forEach((replacementId) => {
+      const workspace = createReasoningWorkspace();
+      applyWorkspaceOperations(workspace, [{
+        type: "add_entry",
+        id: "entry-original",
+        category: "assumptions",
+        content: "Current assumption",
+        origin: "ai_inferred",
+      }]);
+      const before = getWorkspaceSnapshot(workspace);
+
+      assert.throws(
+        () => applyWorkspaceOperations(workspace, [{
+          type,
+          id: "entry-original",
+          replacement_id: replacementId,
+          category: "assumptions",
+          content: "Replacement content",
+          origin: "user_stated",
+        }]),
+        /Workspace replacement_id is required/
+      );
+      assert.deepEqual(getWorkspaceSnapshot(workspace), before);
+    });
   });
 });
 

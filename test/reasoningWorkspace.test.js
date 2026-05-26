@@ -312,3 +312,143 @@ test("rejects invalid remove entry fields without changing the active entry", ()
     assert.equal(getWorkspaceSnapshot(workspace).entries[0].status, "active");
   });
 });
+
+test("undo preserves strictly increasing event versions for subsequent operations", () => {
+  const workspace = createReasoningWorkspace();
+  applyWorkspaceOperations(workspace, [{
+    type: "add_entry",
+    id: "entry-a",
+    category: "options",
+    content: "Option A",
+    origin: "user_stated",
+  }]);
+  applyWorkspaceOperations(workspace, [{
+    type: "add_entry",
+    id: "entry-b",
+    category: "options",
+    content: "Option B",
+    origin: "user_stated",
+  }]);
+
+  undoLastWorkspaceCheckpoint(workspace);
+  applyWorkspaceOperations(workspace, [{
+    type: "add_entry",
+    id: "entry-c",
+    category: "options",
+    content: "Option C",
+    origin: "user_stated",
+  }]);
+
+  const snapshot = getWorkspaceSnapshot(workspace);
+  assert.equal(snapshot.version, 4);
+  assert.deepEqual(snapshot.operation_log.map((operation) => operation.version), [1, 2, 3, 4]);
+  assert.deepEqual(snapshot.entries.map((entry) => entry.id), ["entry-a", "entry-c"]);
+});
+
+test("remove entry must match the active entry category and content", () => {
+  const invalidRemovals = [
+    {
+      type: "remove_entry",
+      id: "entry-constraint",
+      category: "decisions",
+      content: "Must support SSO",
+      origin: "user_stated",
+    },
+    {
+      type: "remove_entry",
+      id: "entry-constraint",
+      category: "constraints",
+      content: "Unrelated content",
+      origin: "user_stated",
+    },
+  ];
+
+  invalidRemovals.forEach((operation) => {
+    const workspace = createReasoningWorkspace();
+    applyWorkspaceOperations(workspace, [{
+      type: "add_entry",
+      id: "entry-constraint",
+      category: "constraints",
+      content: "Must support SSO",
+      origin: "ai_inferred",
+    }]);
+    const before = getWorkspaceSnapshot(workspace);
+
+    assert.throws(
+      () => applyWorkspaceOperations(workspace, [operation]),
+      /Removal must identify the active workspace entry/
+    );
+    assert.deepEqual(getWorkspaceSnapshot(workspace), before);
+    assert.equal(getWorkspaceSnapshot(workspace).entries[0].status, "active");
+  });
+});
+
+test("requires a caller supplied stable id when adding an entry", () => {
+  const workspace = createReasoningWorkspace();
+  assert.throws(
+    () => applyWorkspaceOperations(workspace, [{
+      type: "add_entry",
+      category: "problem",
+      content: "Define the problem",
+      origin: "user_stated",
+    }]),
+    /Workspace entry id is required/
+  );
+  assert.deepEqual(getWorkspaceSnapshot(workspace).entries, []);
+});
+
+["correct_entry", "supersede_entry"].forEach((type) => {
+  test(`requires a caller supplied replacement id for ${type}`, () => {
+    const workspace = createReasoningWorkspace();
+    applyWorkspaceOperations(workspace, [{
+      type: "add_entry",
+      id: "entry-original",
+      category: "assumptions",
+      content: "Current assumption",
+      origin: "ai_inferred",
+    }]);
+    const before = getWorkspaceSnapshot(workspace);
+
+    assert.throws(
+      () => applyWorkspaceOperations(workspace, [{
+        type,
+        id: "entry-original",
+        category: "assumptions",
+        content: "Replacement content",
+        origin: "user_stated",
+      }]),
+      /Workspace replacement_id is required/
+    );
+    assert.deepEqual(getWorkspaceSnapshot(workspace), before);
+  });
+});
+
+test("rejects conflicting turn provenance and logs one resolved turn id", () => {
+  const workspace = createReasoningWorkspace();
+  const before = getWorkspaceSnapshot(workspace);
+
+  assert.throws(
+    () => applyWorkspaceOperations(workspace, [{
+      type: "add_entry",
+      id: "entry-conflict",
+      category: "problem",
+      content: "Conflicting source turns",
+      origin: "user_stated",
+      source_turn_id: "turn-operation",
+    }], { source: "coordinator", turn_id: "turn-metadata" }),
+    /Conflicting workspace turn ids/
+  );
+  assert.deepEqual(getWorkspaceSnapshot(workspace), before);
+
+  applyWorkspaceOperations(workspace, [{
+    type: "add_entry",
+    id: "entry-valid-turn",
+    category: "problem",
+    content: "Consistent source turn",
+    origin: "user_stated",
+    source_turn_id: "turn-1",
+  }], { source: "coordinator", turn_id: "turn-1" });
+
+  assert.equal(workspace.entries[0].source_turn_id, "turn-1");
+  assert.equal(workspace.operation_log[0].turn_id, "turn-1");
+});

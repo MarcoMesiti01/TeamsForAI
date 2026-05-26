@@ -209,23 +209,40 @@ test("undo restores authoritative entries while retaining current working memory
 
 test("working-memory-only updates do not displace the latest committed reasoning undo", () => {
   const workspace = createReasoningWorkspace();
-  applyWorkspaceOperations(workspace, [{
+  const committed = applyWorkspaceOperations(workspace, [{
     type: "add_entry",
     id: "entry-to-undo",
     category: "decisions",
     content: "Select option A",
     origin: "user_stated",
   }]);
-  applyWorkspaceOperations(workspace, [{
+  const memoryOnly = applyWorkspaceOperations(workspace, [{
     type: "update_working_memory",
     summary: "Keep evaluating current trade-offs",
   }]);
+
+  assert.ok(committed.undo_checkpoint_id);
+  assert.equal(memoryOnly.undo_checkpoint_id, null);
+  assert.equal(memoryOnly.workspace_state.can_undo, true);
 
   const undo = undoLastWorkspaceCheckpoint(workspace);
 
   assert.equal(undo.ok, true);
   assert.deepEqual(undo.workspace_state.entries, []);
   assert.equal(undo.workspace_state.working_memory.summary, "Keep evaluating current trade-offs");
+});
+
+test("working-memory-only updates do not report a reasoning undo checkpoint", () => {
+  const workspace = createReasoningWorkspace();
+
+  const result = applyWorkspaceOperations(workspace, [{
+    type: "update_working_memory",
+    summary: "Track the conversation without committing facts",
+  }]);
+
+  assert.equal(result.undo_checkpoint_id, null);
+  assert.equal(result.workspace_state.can_undo, false);
+  assert.equal(getWorkspaceSnapshot(workspace).can_undo, false);
 });
 
 test("undo reports a snapshot when no checkpoint exists", () => {

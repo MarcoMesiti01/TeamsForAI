@@ -76,7 +76,7 @@ Implement milestone 1 from `docs/superpowers/specs/2026-05-26-voice-reasoning-wo
 **Corrected state contract:**
 
 - `add_entry.id` and replacement IDs for `correct_entry` / `supersede_entry` are required non-empty strings supplied by the caller. Only internal checkpoint IDs are generated.
-- Reasoning undo targets the most recent batch containing a committed-workspace mutation (`add_entry`, `correct_entry`, `supersede_entry`, or `remove_entry`). Working-memory-only batches update state and the log but do not occupy reasoning undo.
+- Reasoning undo targets the most recent batch containing a committed-workspace mutation (`add_entry`, `correct_entry`, `supersede_entry`, or `remove_entry`). Working-memory-only batches update state and the log but do not occupy reasoning undo and return `undo_checkpoint_id: null`; operation-log records may still carry an internal checkpoint/correlation ID.
 - Undo restores committed entries only; it leaves the current working-memory layer intact. Operation-log and public workspace versions remain strictly monotonic through undo and later operations.
 
 - [ ] **Step 1: Register and write failing workspace state tests**
@@ -281,6 +281,7 @@ function applyWorkspaceOperations(workspace, operations = [], metadata = {}) {
   });
   const checkpointId = makeId("workspace-checkpoint");
   const before = stateSnapshot(workspace);
+  const hasCommittedMutation = operations.some((operation) => COMMITTED_OPERATION_TYPES.has(operation.type));
   operations.forEach((operation) => {
     applyOperation(workspace, operation);
     workspace.version += 1;
@@ -293,10 +294,10 @@ function applyWorkspaceOperations(workspace, operations = [], metadata = {}) {
       applied_at: new Date().toISOString(),
     });
   });
-  if (operations.some((operation) => COMMITTED_OPERATION_TYPES.has(operation.type))) {
+  if (hasCommittedMutation) {
     workspace.undo_stack.push({ checkpoint_id: checkpointId, snapshot: before });
   }
-  return { ok: true, workspace_state: getWorkspaceSnapshot(workspace), undo_checkpoint_id: checkpointId };
+  return { ok: true, workspace_state: getWorkspaceSnapshot(workspace), undo_checkpoint_id: hasCommittedMutation ? checkpointId : null };
 }
 
 function undoLastWorkspaceCheckpoint(workspace) {

@@ -222,6 +222,7 @@ test("normalizeUpdate fails closed for update actions with missing or malformed 
   [
     { action: "update" },
     { action: "update", operations: "not an array" },
+    { action: "update", operations: [] },
   ].forEach((raw) => {
     assert.deepEqual(normalizeUpdate(raw), {
       action: "clarify",
@@ -243,6 +244,20 @@ test("normalizeUpdate fails closed for update actions with missing or malformed 
     spoken_commit_notice: "",
     needs_clarification: "",
   });
+});
+
+test("normalizeUpdate fails closed for empty update operation batches with or without workspace", () => {
+  for (const workspace of [undefined, createWorkspace()]) {
+    assert.deepEqual(normalizeUpdate({
+      action: "update",
+      operations: [],
+    }, workspace), {
+      action: "clarify",
+      operations: [],
+      spoken_commit_notice: "",
+      needs_clarification: "",
+    });
+  }
 });
 
 test("normalizeUpdate discards operations for non-update actions", () => {
@@ -316,12 +331,12 @@ test("normalizeUpdate rejects invalid operation batches fail closed", () => {
       action: "update",
       operations,
       spoken_commit_notice: "Saved.",
-      needs_clarification: "",
+      needs_clarification: "Which entry?",
     }), {
       action: "clarify",
       operations: [],
-      spoken_commit_notice: "Saved.",
-      needs_clarification: "",
+      spoken_commit_notice: "",
+      needs_clarification: "Which entry?",
     }, reason);
   });
 });
@@ -490,6 +505,10 @@ test("natural reasoning undo utterances are detected without catching unrelated 
     "explain undo memory semantics",
     "undo the last board layout",
     "If we undo the last decision, what happens?",
+    "Undo the last decision if that is possible",
+    "Undo the last decision unless that would lose context",
+    "Undo the last decision assuming it is safe",
+    "Undo the last decision provided that it is reversible",
     "Undo the last decision is not what I want",
   ];
 

@@ -6,6 +6,14 @@ const {
   normalizeResponse,
 } = require("../lib/workspaceResponseService");
 
+const VOICE_SAFE_FALLBACK = {
+  spoken_summary: "I captured the reasoning context, but I could not generate a grounded answer yet.",
+  full_response: "I could not generate a grounded workspace answer from the available model output.",
+  reasoning_summary: "No usable model response was generated.",
+  uncertainties: [],
+  next_examination: "",
+};
+
 function createInput() {
   return {
     turn_id: "turn-9",
@@ -78,36 +86,71 @@ test("injected responseProvider receives unchanged utterance and workspace conte
 
 test("normalizeResponse coerces missing and malformed fields safely", () => {
   assert.deepEqual(normalizeResponse({
-    spoken_summary: 42,
-    full_response: null,
-    reasoning_summary: false,
+    spoken_summary: "  Canary remains the best grounded option.  ",
+    full_response: "  Full answer.  ",
+    reasoning_summary: "  Reasoning.  ",
     uncertainties: ["known", 7, null],
-    next_examination: undefined,
+    next_examination: "  Review deployment window.  ",
   }), {
-    spoken_summary: "42",
-    full_response: "",
-    reasoning_summary: "false",
+    spoken_summary: "Canary remains the best grounded option.",
+    full_response: "Full answer.",
+    reasoning_summary: "Reasoning.",
     uncertainties: ["known", "7", "null"],
-    next_examination: "",
+    next_examination: "Review deployment window.",
   });
 
-  assert.deepEqual(normalizeResponse({
-    uncertainties: "not an array",
-  }), {
-    spoken_summary: "",
-    full_response: "",
-    reasoning_summary: "",
-    uncertainties: [],
-    next_examination: "",
+  assert.deepEqual(normalizeResponse({ uncertainties: "not an array" }), VOICE_SAFE_FALLBACK);
+  assert.deepEqual(normalizeResponse(), VOICE_SAFE_FALLBACK);
+});
+
+test("responseProvider blank spoken_summary falls back to voice-safe response", async () => {
+  const result = await generateWorkspaceResponse(createInput(), {
+    responseProvider: async () => ({
+      spoken_summary: "   ",
+      full_response: "Model returned details that should not be spoken without a summary.",
+      reasoning_summary: "Blank summary from provider.",
+      uncertainties: ["Needs review."],
+      next_examination: "Retry generation.",
+    }),
   });
 
-  assert.deepEqual(normalizeResponse(), {
-    spoken_summary: "",
-    full_response: "",
-    reasoning_summary: "",
-    uncertainties: [],
-    next_examination: "",
+  assert.deepEqual(result, VOICE_SAFE_FALLBACK);
+});
+
+test("API response with missing output text falls back to voice-safe response", async () => {
+  const result = await generateWorkspaceResponse(createInput(), {
+    apiKey: "test-key",
+    fetchImpl: async () => ({
+      ok: true,
+      async json() {
+        return {};
+      },
+    }),
   });
+
+  assert.deepEqual(result, VOICE_SAFE_FALLBACK);
+});
+
+test("API response with parsed blank spoken_summary falls back to voice-safe response", async () => {
+  const result = await generateWorkspaceResponse(createInput(), {
+    apiKey: "test-key",
+    fetchImpl: async () => ({
+      ok: true,
+      async json() {
+        return {
+          output_text: JSON.stringify({
+            spoken_summary: "\n\t",
+            full_response: "Model produced a full response without a voice summary.",
+            reasoning_summary: "Parsed blank spoken summary.",
+            uncertainties: [],
+            next_examination: "",
+          }),
+        };
+      },
+    }),
+  });
+
+  assert.deepEqual(result, VOICE_SAFE_FALLBACK);
 });
 
 test("no-key fallback is conservative and does not claim deeper reasoning", async () => {

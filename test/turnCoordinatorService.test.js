@@ -253,7 +253,7 @@ test("response failure preserves committed workspace and returns safe spoken sum
   assert.equal(result.spoken_summary, "I captured the reasoning update, but I could not complete the deeper analysis yet.");
 });
 
-test("routing failure preserves committed workspace and response without board command", async () => {
+test("routing failure after committed mutation returns deterministic reasoning sync command", async () => {
   const state = createState();
 
   const result = await coordinateReasoningTurn({
@@ -272,6 +272,36 @@ test("routing failure preserves committed workspace and response without board c
 
   assert.equal(result.workspace_state.entries[0].id, "option-route-fails");
   assert.equal(result.spoken_summary, "Canary rollout is saved.");
+  assert.equal(result.board_sync_error, "router offline");
+  assert.equal(result.board_sync_required, true);
+  assert.equal(result.board_command.command_type, "reorganize_artifact");
+  assert.equal(result.board_command.artifact_type, "idea_map");
+  assert.equal(result.board_command.sync_reason, "committed_workspace_change");
+  assert.equal(result.board_command.workspace_context.active_entries.options[0].id, "option-route-fails");
+});
+
+test("routing failure after working-memory-only update does not require board sync", async () => {
+  const state = createState();
+
+  const result = await coordinateReasoningTurn({
+    turn_id: "turn-working-route-fails",
+    utterance: "We are still comparing launch options.",
+  }, state, {
+    updateProvider: async () => ({
+      action: "update",
+      operations: [{
+        type: "update_working_memory",
+        summary: "Comparing launch options",
+        current_topic: "Launch options",
+      }],
+    }),
+    responseProvider: async () => ({ spoken_summary: "I noted that we are comparing launch options." }),
+    routeProvider: async () => {
+      throw new Error("router offline");
+    },
+  });
+
+  assert.equal(result.spoken_summary, "I noted that we are comparing launch options.");
   assert.equal(result.board_sync_error, "router offline");
   assert.equal(result.board_sync_required, false);
   assert.equal(result.board_command, null);

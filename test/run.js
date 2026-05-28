@@ -10,3 +10,4 @@ require("./brainService.test");
 require("./frontendLayout.test");
 require("./reasoningWorkspace.test");
 require("./workspaceContext.test");
+require("./workspaceUpdateService.test");

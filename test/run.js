@@ -12,3 +12,4 @@ require("./reasoningWorkspace.test");
 require("./workspaceContext.test");
 require("./workspaceUpdateService.test");
 require("./workspaceResponseService.test");
+require("./turnCoordinatorService.test");

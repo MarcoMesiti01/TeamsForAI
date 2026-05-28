@@ -59,11 +59,11 @@ test("records working memory and committed entries with provenance", () => {
   ], { source: "coordinator", turn_id: "turn-1" });
 
   assert.equal(result.ok, true);
-  assert.match(result.undo_checkpoint_id, /^workspace-checkpoint-/);
+  assert.equal(result.undo_checkpoint_id, "workspace-checkpoint-1");
   assert.equal(result.workspace_state.version, 2);
   assert.equal(result.workspace_state.working_memory.current_topic, "Platform choice");
   assert.equal(result.workspace_state.working_memory.summary, "Comparing two platform options");
-  assert.ok(result.workspace_state.working_memory.updated_at);
+  assert.equal(result.workspace_state.working_memory.updated_at, "version-1");
   assert.deepEqual(result.workspace_state.entries[0], {
     id: "entry-cost",
     category: "criteria",
@@ -78,7 +78,38 @@ test("records working memory and committed entries with provenance", () => {
   assert.equal(workspace.operation_log[0].source, "coordinator");
   assert.equal(workspace.operation_log[0].turn_id, "turn-1");
   assert.equal(workspace.operation_log[0].checkpoint_id, result.undo_checkpoint_id);
-  assert.ok(workspace.operation_log[0].applied_at);
+  assert.equal(workspace.operation_log[0].applied_at, "version-1");
+});
+
+test("replaying identical operations from identical state produces identical snapshots", () => {
+  const operations = [
+    {
+      type: "update_working_memory",
+      summary: "Compare approaches",
+      candidate_options: ["Option A", "Option B"],
+    },
+    {
+      type: "add_entry",
+      id: "entry-objective",
+      category: "objectives",
+      content: "Improve reliability",
+      origin: "user_stated",
+      source_turn_id: "turn-1",
+    },
+  ];
+  const metadata = { source: "coordinator", turn_id: "turn-1" };
+  const first = createReasoningWorkspace();
+  const second = createReasoningWorkspace();
+
+  applyWorkspaceOperations(first, operations, metadata);
+  applyWorkspaceOperations(second, operations, metadata);
+
+  assert.deepEqual(getWorkspaceSnapshot(first), getWorkspaceSnapshot(second));
+  assert.deepEqual(first.operation_log.map((operation) => operation.applied_at), ["version-1", "version-2"]);
+  assert.deepEqual(first.operation_log.map((operation) => operation.checkpoint_id), [
+    "workspace-checkpoint-1",
+    "workspace-checkpoint-1",
+  ]);
 });
 
 test("correction preserves the old entry and creates an active replacement", () => {
@@ -561,6 +592,96 @@ test("rejects conflicting turn provenance and logs one resolved turn id", () => 
 
   assert.equal(workspace.entries[0].source_turn_id, "turn-1");
   assert.equal(workspace.operation_log[0].turn_id, "turn-1");
+});
+
+test("rejects malformed provenance ids without mutating workspace", () => {
+  const invalidMetadataTurnIds = [7, { id: "turn" }, "  "];
+  invalidMetadataTurnIds.forEach((turnId) => {
+    const workspace = createReasoningWorkspace();
+    const before = getWorkspaceSnapshot(workspace);
+
+    assert.throws(
+      () => applyWorkspaceOperations(workspace, [{
+        type: "add_entry",
+        id: "entry-valid",
+        category: "problem",
+        content: "Define the problem",
+        origin: "user_stated",
+      }], { turn_id: turnId }),
+      /Workspace metadata turn_id must be a non-empty string or null/
+    );
+    assert.deepEqual(getWorkspaceSnapshot(workspace), before);
+  });
+
+  const invalidOperationTurnIds = [7, { id: "turn" }, "  "];
+  invalidOperationTurnIds.forEach((sourceTurnId) => {
+    const workspace = createReasoningWorkspace();
+    const before = getWorkspaceSnapshot(workspace);
+
+    assert.throws(
+      () => applyWorkspaceOperations(workspace, [{
+        type: "add_entry",
+        id: "entry-valid",
+        category: "problem",
+        content: "Define the problem",
+        origin: "user_stated",
+        source_turn_id: sourceTurnId,
+      }]),
+      /Workspace operation source_turn_id must be a non-empty string or null/
+    );
+    assert.deepEqual(getWorkspaceSnapshot(workspace), before);
+  });
+});
+
+test("allows absent and null provenance ids", () => {
+  const workspace = createReasoningWorkspace();
+
+  applyWorkspaceOperations(workspace, [{
+    type: "add_entry",
+    id: "entry-no-turn",
+    category: "problem",
+    content: "Define the problem",
+    origin: "user_stated",
+    source_turn_id: null,
+  }], { turn_id: null });
+
+  assert.equal(workspace.entries[0].source_turn_id, null);
+  assert.equal(workspace.operation_log[0].turn_id, null);
+});
+
+test("rejects malformed working memory array items without mutating workspace", () => {
+  const fields = ["candidate_options", "provisional_observations", "unresolved_references"];
+  fields.forEach((field) => {
+    [[{ value: "object" }], [42], ["  "]].forEach((value) => {
+      const workspace = createReasoningWorkspace();
+      const before = getWorkspaceSnapshot(workspace);
+
+      assert.throws(
+        () => applyWorkspaceOperations(workspace, [{
+          type: "update_working_memory",
+          [field]: value,
+        }]),
+        new RegExp(`Working memory ${field} must contain only non-empty strings`)
+      );
+      assert.deepEqual(getWorkspaceSnapshot(workspace), before);
+    });
+  });
+});
+
+test("rejects working memory updates without recognized fields", () => {
+  [
+    { type: "update_working_memory", summry: "typo" },
+    { type: "update_working_memory" },
+  ].forEach((operation) => {
+    const workspace = createReasoningWorkspace();
+    const before = getWorkspaceSnapshot(workspace);
+
+    assert.throws(
+      () => applyWorkspaceOperations(workspace, [operation]),
+      /Working memory update must include at least one recognized field/
+    );
+    assert.deepEqual(getWorkspaceSnapshot(workspace), before);
+  });
 });
 
 const malformedCommittedContents = [{ nested: "object" }, ["array content"], 7];

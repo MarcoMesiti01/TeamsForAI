@@ -75,9 +75,10 @@ Implement milestone 1 from `docs/superpowers/specs/2026-05-26-voice-reasoning-wo
 
 **Corrected state contract:**
 
-- `add_entry.id` and replacement IDs for `correct_entry` / `supersede_entry` are required non-empty strings supplied by the caller. Only internal checkpoint IDs are generated.
-- `CATEGORIES` exports an immutable value collection for consumers; category validation uses an internal set that callers cannot mutate. Committed entry content must be a non-empty string and is never coerced from other values.
-- Reasoning undo targets the most recent batch containing a committed-workspace mutation (`add_entry`, `correct_entry`, `supersede_entry`, or `remove_entry`). Working-memory-only batches update state and the log but do not occupy reasoning undo and return `undo_checkpoint_id: null`; operation-log records may still carry an internal checkpoint/correlation ID.
+- `add_entry.id` and replacement IDs for `correct_entry` / `supersede_entry` are required non-empty strings supplied by the caller. Internal checkpoint IDs are deterministic (`workspace-checkpoint-<next-version>`) so replaying the same operations from the same initial state produces identical public snapshots.
+- `CATEGORIES` exports an immutable value collection for consumers; category validation uses an internal set that callers cannot mutate. Committed entry content must be a non-empty string and is never coerced from other values. `metadata.turn_id` and `operation.source_turn_id` must be absent, null, or non-empty strings; malformed values are rejected atomically, and conflicting non-empty strings are still rejected.
+- Working-memory `summary` and `current_topic` must be strings, `board_focus` must be a string or null, and `candidate_options`, `provisional_observations`, and `unresolved_references` must be arrays containing only non-empty strings. `update_working_memory` operations must include at least one recognized working-memory field.
+- Reasoning undo targets the most recent batch containing a committed-workspace mutation (`add_entry`, `correct_entry`, `supersede_entry`, or `remove_entry`). Working-memory-only batches update state and the log but do not occupy reasoning undo and return `undo_checkpoint_id: null`; operation-log records carry deterministic checkpoint/correlation IDs and `applied_at` markers like `version-<n>`.
 - Undo restores committed entries only; it leaves the current working-memory layer intact. Operation-log and public workspace versions remain strictly monotonic through undo and later operations.
 
 - [ ] **Step 1: Register and write failing workspace state tests**
@@ -193,9 +194,21 @@ const OPERATION_TYPES = new Set([
 const COMMITTED_OPERATION_TYPES = new Set([
   "add_entry", "correct_entry", "supersede_entry", "remove_entry",
 ]);
+const ARRAY_MEMORY_FIELDS = new Set([
+  "candidate_options", "provisional_observations", "unresolved_references",
+]);
+const TEXT_MEMORY_FIELDS = new Set(["summary", "current_topic"]);
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function versionMarker(version) {
+  return `version-${version}`;
+}
+
+function checkpointIdForVersion(version) {
+  return `workspace-checkpoint-${version}`;
 }
 
 function createReasoningWorkspace() {
@@ -222,8 +235,17 @@ function validateEntryOperation(operation) {
   if (typeof operation.content !== "string" || !operation.content.trim()) throw new Error("Workspace entry content is required.");
 }
 
-function makeId(prefix) {
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+function validateOptionalTurnId(value, label) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !value.trim()) throw new Error(`${label} must be a non-empty string or null.`);
+  return value;
+}
+
+function resolveTurnId(operation, metadata) {
+  const operationTurnId = validateOptionalTurnId(operation.source_turn_id, "Workspace operation source_turn_id");
+  const metadataTurnId = validateOptionalTurnId(metadata.turn_id, "Workspace metadata turn_id");
+  if (operationTurnId && metadataTurnId && operationTurnId !== metadataTurnId) throw new Error("Conflicting workspace turn ids.");
+  return metadataTurnId || operationTurnId || null;
 }
 
 function stateSnapshot(workspace) {
@@ -232,13 +254,36 @@ function stateSnapshot(workspace) {
   };
 }
 
-function applyOperation(workspace, operation) {
+function applyWorkingMemoryUpdate(workspace, operation, appliedAt) {
+  const changes = {};
+  TEXT_MEMORY_FIELDS.forEach((field) => {
+    if (field in operation) {
+      if (typeof operation[field] !== "string") throw new Error(`Working memory ${field} must be a string.`);
+      changes[field] = operation[field];
+    }
+  });
+  ARRAY_MEMORY_FIELDS.forEach((field) => {
+    if (field in operation) {
+      if (!Array.isArray(operation[field])) throw new Error(`Working memory ${field} must be an array.`);
+      if (operation[field].some((item) => typeof item !== "string" || !item.trim())) {
+        throw new Error(`Working memory ${field} must contain only non-empty strings.`);
+      }
+      changes[field] = clone(operation[field]);
+    }
+  });
+  if ("board_focus" in operation) {
+    if (operation.board_focus !== null && typeof operation.board_focus !== "string") {
+      throw new Error("Working memory board_focus must be a string or null.");
+    }
+    changes.board_focus = operation.board_focus;
+  }
+  if (Object.keys(changes).length === 0) throw new Error("Working memory update must include at least one recognized field.");
+  workspace.working_memory = { ...workspace.working_memory, ...changes, updated_at: appliedAt };
+}
+
+function applyOperation(workspace, operation, turnId, appliedAt) {
   if (operation.type === "update_working_memory") {
-    workspace.working_memory = {
-      ...workspace.working_memory,
-      ...Object.fromEntries(Object.entries(operation).filter(([key]) => key !== "type")),
-      updated_at: new Date().toISOString(),
-    };
+    applyWorkingMemoryUpdate(workspace, operation, appliedAt);
     return;
   }
   const entry = workspace.entries.find((candidate) => candidate.id === operation.id);
@@ -249,7 +294,7 @@ function applyOperation(workspace, operation) {
       category: operation.category,
       content: operation.content.trim(),
       origin: operation.origin,
-      source_turn_id: operation.source_turn_id || null,
+      source_turn_id: turnId,
       status: "active",
       supersedes_id: null,
     });
@@ -267,7 +312,7 @@ function applyOperation(workspace, operation) {
     category: operation.category,
     content: operation.content.trim(),
     origin: operation.origin,
-    source_turn_id: operation.source_turn_id || null,
+    source_turn_id: turnId,
     status: "active",
     supersedes_id: entry.id,
   });
@@ -281,24 +326,33 @@ function applyWorkspaceOperations(workspace, operations = [], metadata = {}) {
     if (!OPERATION_TYPES.has(operation?.type)) throw new Error(`Unsupported workspace operation: ${operation?.type || "unknown"}`);
     if (operation.type !== "update_working_memory") validateEntryOperation(operation);
   });
-  const checkpointId = makeId("workspace-checkpoint");
+  const checkpointId = checkpointIdForVersion(workspace.version + 1);
   const before = stateSnapshot(workspace);
+  const draft = clone(workspace);
   const hasCommittedMutation = operations.some((operation) => COMMITTED_OPERATION_TYPES.has(operation.type));
   operations.forEach((operation) => {
-    applyOperation(workspace, operation);
-    workspace.version += 1;
-    workspace.operation_log.push({
+    const nextVersion = draft.version + 1;
+    const appliedAt = versionMarker(nextVersion);
+    const turnId = resolveTurnId(operation, metadata);
+    applyOperation(draft, operation, turnId, appliedAt);
+    draft.version = nextVersion;
+    draft.operation_log.push({
       ...clone(operation),
       source: metadata.source || "system",
-      turn_id: metadata.turn_id || operation.source_turn_id || null,
+      turn_id: turnId,
       checkpoint_id: checkpointId,
-      version: workspace.version,
-      applied_at: new Date().toISOString(),
+      version: draft.version,
+      applied_at: appliedAt,
     });
   });
   if (hasCommittedMutation) {
-    workspace.undo_stack.push({ checkpoint_id: checkpointId, snapshot: before });
+    draft.undo_stack.push({ checkpoint_id: checkpointId, snapshot: before });
   }
+  workspace.version = draft.version;
+  workspace.working_memory = draft.working_memory;
+  workspace.entries = draft.entries;
+  workspace.operation_log = draft.operation_log;
+  workspace.undo_stack = draft.undo_stack;
   return { ok: true, workspace_state: getWorkspaceSnapshot(workspace), undo_checkpoint_id: hasCommittedMutation ? checkpointId : null };
 }
 
@@ -309,12 +363,14 @@ function undoLastWorkspaceCheckpoint(workspace) {
   }
   workspace.entries = clone(checkpoint.snapshot.entries);
   workspace.version += 1;
+  const appliedAt = versionMarker(workspace.version);
   workspace.operation_log.push({
     type: "undo",
     checkpoint_id: checkpoint.checkpoint_id,
     source: "user",
+    turn_id: null,
     version: workspace.version,
-    applied_at: new Date().toISOString(),
+    applied_at: appliedAt,
   });
   return { ok: true, undone_checkpoint_id: checkpoint.checkpoint_id, workspace_state: getWorkspaceSnapshot(workspace) };
 }

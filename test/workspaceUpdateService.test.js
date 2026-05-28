@@ -114,6 +114,22 @@ test("undo utterance returns undo action and does not call provider", async () =
   });
 });
 
+test("negated undo talk calls provider and does not return undo", async () => {
+  let providerCalled = false;
+  const result = await proposeWorkspaceUpdate({
+    utterance: "I don't think we should undo the last decision",
+  }, createWorkspace(), {
+    updateProvider: async () => {
+      providerCalled = true;
+      return { action: "clarify", operations: [] };
+    },
+  });
+
+  assert.equal(providerCalled, true);
+  assert.equal(result.action, "clarify");
+  assert.deepEqual(result.operations, []);
+});
+
 test("no-key fallback updates only working memory and does not invent committed knowledge", async () => {
   const utterance = "Let's compare canary and blue-green before choosing.";
   const result = await proposeWorkspaceUpdate({
@@ -132,6 +148,21 @@ test("no-key fallback updates only working memory and does not invent committed 
       current_topic: utterance.slice(0, 80),
     },
   ]);
+});
+
+test("blank utterance falls back to non-empty user goal", async () => {
+  let providerInput;
+  await proposeWorkspaceUpdate({
+    utterance: "   ",
+    user_goal: "valid goal",
+  }, createWorkspace(), {
+    updateProvider: async (input) => {
+      providerInput = input;
+      return { action: "clarify", operations: [] };
+    },
+  });
+
+  assert.equal(providerInput.utterance, "valid goal");
 });
 
 test("empty utterance throws", async () => {
@@ -181,6 +212,33 @@ test("normalizeUpdate handles malformed provider results safely", () => {
 
   assert.deepEqual(normalizeUpdate(), {
     action: "clarify",
+    operations: [],
+    spoken_commit_notice: "",
+    needs_clarification: "",
+  });
+});
+
+test("normalizeUpdate fails closed for update actions with missing or malformed operations", () => {
+  [
+    { action: "update" },
+    { action: "update", operations: "not an array" },
+  ].forEach((raw) => {
+    assert.deepEqual(normalizeUpdate(raw), {
+      action: "clarify",
+      operations: [],
+      spoken_commit_notice: "",
+      needs_clarification: "",
+    });
+  });
+
+  assert.deepEqual(normalizeUpdate({ action: "clarify" }), {
+    action: "clarify",
+    operations: [],
+    spoken_commit_notice: "",
+    needs_clarification: "",
+  });
+  assert.deepEqual(normalizeUpdate({ action: "undo" }), {
+    action: "undo",
     operations: [],
     spoken_commit_notice: "",
     needs_clarification: "",
@@ -241,6 +299,103 @@ test("normalizeUpdate rejects invalid operation batches fail closed", () => {
       needs_clarification: "",
     }, reason);
   });
+});
+
+test("proposeWorkspaceUpdate fails closed when provider returns duplicate add_entry id", async () => {
+  const result = await proposeWorkspaceUpdate({
+    turn_id: "turn-2",
+    utterance: "Save a duplicate objective.",
+  }, createWorkspace(), {
+    updateProvider: async () => ({
+      action: "update",
+      operations: [{
+        type: "add_entry",
+        id: "objective-1",
+        category: "objectives",
+        content: "Reduce rollout risk",
+        origin: "user_stated",
+        source_turn_id: "turn-2",
+      }],
+    }),
+  });
+
+  assert.deepEqual(result, {
+    action: "clarify",
+    operations: [],
+    spoken_commit_notice: "",
+    needs_clarification: "",
+  });
+});
+
+test("proposeWorkspaceUpdate fails closed when provider targets missing active entries", async () => {
+  for (const type of ["correct_entry", "supersede_entry", "remove_entry"]) {
+    const operation = {
+      type,
+      id: "missing-entry",
+      category: "objectives",
+      content: "Reduce rollout risk",
+      origin: "user_stated",
+      source_turn_id: "turn-2",
+    };
+    if (type !== "remove_entry") {
+      operation.replacement_id = `${type}-replacement`;
+    }
+
+    const result = await proposeWorkspaceUpdate({
+      turn_id: "turn-2",
+      utterance: `Try ${type} against a missing entry.`,
+    }, createWorkspace(), {
+      updateProvider: async () => ({
+        action: "update",
+        operations: [operation],
+      }),
+    });
+
+    assert.deepEqual(result, {
+      action: "clarify",
+      operations: [],
+      spoken_commit_notice: "",
+      needs_clarification: "",
+    }, type);
+  }
+});
+
+test("proposeWorkspaceUpdate fails closed when provider remove_entry mismatches active content or category", async () => {
+  for (const operation of [
+    {
+      type: "remove_entry",
+      id: "objective-1",
+      category: "decisions",
+      content: "Reduce rollout risk",
+      origin: "user_stated",
+      source_turn_id: "turn-2",
+    },
+    {
+      type: "remove_entry",
+      id: "objective-1",
+      category: "objectives",
+      content: "Reduce deployment risk",
+      origin: "user_stated",
+      source_turn_id: "turn-2",
+    },
+  ]) {
+    const result = await proposeWorkspaceUpdate({
+      turn_id: "turn-2",
+      utterance: "Remove an entry with mismatched details.",
+    }, createWorkspace(), {
+      updateProvider: async () => ({
+        action: "update",
+        operations: [operation],
+      }),
+    });
+
+    assert.deepEqual(result, {
+      action: "clarify",
+      operations: [],
+      spoken_commit_notice: "",
+      needs_clarification: "",
+    });
+  }
 });
 
 test("normalizeUpdate clones accepted operations", () => {

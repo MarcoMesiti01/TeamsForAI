@@ -245,6 +245,31 @@ test("normalizeUpdate fails closed for update actions with missing or malformed 
   });
 });
 
+test("normalizeUpdate discards operations for non-update actions", () => {
+  const validOperations = [{
+    type: "update_working_memory",
+    summary: "Compare rollout plans",
+  }];
+
+  [
+    { action: "clarify", expectedAction: "clarify" },
+    { action: "undo", expectedAction: "undo" },
+    { action: "apply_everything", expectedAction: "clarify" },
+  ].forEach(({ action, expectedAction }) => {
+    assert.deepEqual(normalizeUpdate({
+      action,
+      operations: validOperations,
+      spoken_commit_notice: "Noted.",
+      needs_clarification: "Which update?",
+    }), {
+      action: expectedAction,
+      operations: [],
+      spoken_commit_notice: "Noted.",
+      needs_clarification: "Which update?",
+    }, action);
+  });
+});
+
 test("normalizeUpdate rejects invalid operation batches fail closed", () => {
   const invalidBatches = [
     {
@@ -464,6 +489,8 @@ test("natural reasoning undo utterances are detected without catching unrelated 
     "I do not want to undo the last decision",
     "explain undo memory semantics",
     "undo the last board layout",
+    "If we undo the last decision, what happens?",
+    "Undo the last decision is not what I want",
   ];
 
   for (const utterance of positiveUtterances) {

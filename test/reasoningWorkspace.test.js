@@ -277,6 +277,34 @@ test("rejects invalid operation batches and unsupported entry categories", () =>
   );
 });
 
+test("external category collection mutation cannot extend validation categories", () => {
+  const workspace = createReasoningWorkspace();
+
+  try {
+    if (typeof CATEGORIES.add === "function") {
+      CATEGORIES.add("risks");
+    } else {
+      assert.equal(Object.isFrozen(CATEGORIES), true);
+      assert.throws(() => CATEGORIES.push("risks"), TypeError);
+    }
+
+    assert.throws(
+      () => applyWorkspaceOperations(workspace, [{
+        type: "add_entry",
+        id: "entry-risk",
+        category: "risks",
+        content: "This category must remain unsupported",
+        origin: "user_stated",
+      }]),
+      /Unsupported workspace category/
+    );
+  } finally {
+    if (typeof CATEGORIES.delete === "function") {
+      CATEGORIES.delete("risks");
+    }
+  }
+});
+
 test("invalid operation in a batch leaves workspace completely unchanged", () => {
   const workspace = createReasoningWorkspace();
   const before = getWorkspaceSnapshot(workspace);
@@ -533,4 +561,81 @@ test("rejects conflicting turn provenance and logs one resolved turn id", () => 
 
   assert.equal(workspace.entries[0].source_turn_id, "turn-1");
   assert.equal(workspace.operation_log[0].turn_id, "turn-1");
+});
+
+const malformedCommittedContents = [{ nested: "object" }, ["array content"], 7];
+
+test("add entry rejects non-string committed content without mutating workspace", () => {
+  malformedCommittedContents.forEach((content, index) => {
+    const workspace = createReasoningWorkspace();
+    const before = getWorkspaceSnapshot(workspace);
+
+    assert.throws(
+      () => applyWorkspaceOperations(workspace, [{
+        type: "add_entry",
+        id: `entry-invalid-${index}`,
+        category: "problem",
+        content,
+        origin: "user_stated",
+      }]),
+      /Workspace entry content is required/
+    );
+    assert.deepEqual(getWorkspaceSnapshot(workspace), before);
+  });
+});
+
+["correct_entry", "supersede_entry"].forEach((type) => {
+  test(`${type} rejects non-string committed content without mutating workspace`, () => {
+    malformedCommittedContents.forEach((content, index) => {
+      const workspace = createReasoningWorkspace();
+      applyWorkspaceOperations(workspace, [{
+        type: "add_entry",
+        id: "entry-original-content",
+        category: "assumptions",
+        content: "Original string content",
+        origin: "ai_inferred",
+      }]);
+      const before = getWorkspaceSnapshot(workspace);
+
+      assert.throws(
+        () => applyWorkspaceOperations(workspace, [{
+          type,
+          id: "entry-original-content",
+          replacement_id: `entry-replacement-${index}`,
+          category: "assumptions",
+          content,
+          origin: "user_stated",
+        }]),
+        /Workspace entry content is required/
+      );
+      assert.deepEqual(getWorkspaceSnapshot(workspace), before);
+    });
+  });
+});
+
+test("remove entry rejects non-string committed content without mutating workspace", () => {
+  malformedCommittedContents.forEach((content, index) => {
+    const workspace = createReasoningWorkspace();
+    const stringifiedContent = String(content).trim();
+    applyWorkspaceOperations(workspace, [{
+      type: "add_entry",
+      id: `entry-remove-${index}`,
+      category: "assumptions",
+      content: stringifiedContent,
+      origin: "ai_inferred",
+    }]);
+    const before = getWorkspaceSnapshot(workspace);
+
+    assert.throws(
+      () => applyWorkspaceOperations(workspace, [{
+        type: "remove_entry",
+        id: `entry-remove-${index}`,
+        category: "assumptions",
+        content,
+        origin: "user_stated",
+      }]),
+      /Workspace entry content is required/
+    );
+    assert.deepEqual(getWorkspaceSnapshot(workspace), before);
+  });
 });

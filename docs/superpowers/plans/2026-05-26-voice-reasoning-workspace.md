@@ -76,6 +76,7 @@ Implement milestone 1 from `docs/superpowers/specs/2026-05-26-voice-reasoning-wo
 **Corrected state contract:**
 
 - `add_entry.id` and replacement IDs for `correct_entry` / `supersede_entry` are required non-empty strings supplied by the caller. Only internal checkpoint IDs are generated.
+- `CATEGORIES` exports an immutable value collection for consumers; category validation uses an internal set that callers cannot mutate. Committed entry content must be a non-empty string and is never coerced from other values.
 - Reasoning undo targets the most recent batch containing a committed-workspace mutation (`add_entry`, `correct_entry`, `supersede_entry`, or `remove_entry`). Working-memory-only batches update state and the log but do not occupy reasoning undo and return `undo_checkpoint_id: null`; operation-log records may still carry an internal checkpoint/correlation ID.
 - Undo restores committed entries only; it leaves the current working-memory layer intact. Operation-log and public workspace versions remain strictly monotonic through undo and later operations.
 
@@ -179,10 +180,11 @@ Expected: FAIL because `../lib/reasoningWorkspace` does not exist.
 Create `lib/reasoningWorkspace.js` with a small state machine and clone-based checkpoints:
 
 ```js
-const CATEGORIES = new Set([
+const CATEGORIES = Object.freeze([
   "problem", "objectives", "constraints", "assumptions",
   "options", "criteria", "decisions", "open_questions",
 ]);
+const CATEGORY_SET = new Set(CATEGORIES);
 const ORIGINS = new Set(["user_stated", "ai_inferred"]);
 const OPERATION_TYPES = new Set([
   "update_working_memory", "add_entry", "correct_entry",
@@ -215,9 +217,9 @@ function createReasoningWorkspace() {
 }
 
 function validateEntryOperation(operation) {
-  if (!CATEGORIES.has(operation.category)) throw new Error(`Unsupported workspace category: ${operation.category}`);
+  if (!CATEGORY_SET.has(operation.category)) throw new Error(`Unsupported workspace category: ${operation.category}`);
   if (!ORIGINS.has(operation.origin)) throw new Error(`Unsupported workspace origin: ${operation.origin}`);
-  if (!String(operation.content || "").trim()) throw new Error("Workspace entry content is required.");
+  if (typeof operation.content !== "string" || !operation.content.trim()) throw new Error("Workspace entry content is required.");
 }
 
 function makeId(prefix) {
@@ -245,7 +247,7 @@ function applyOperation(workspace, operation) {
     workspace.entries.push({
       id: operation.id,
       category: operation.category,
-      content: String(operation.content).trim(),
+      content: operation.content.trim(),
       origin: operation.origin,
       source_turn_id: operation.source_turn_id || null,
       status: "active",
@@ -263,7 +265,7 @@ function applyOperation(workspace, operation) {
   workspace.entries.push({
     id: operation.replacement_id,
     category: operation.category,
-    content: String(operation.content).trim(),
+    content: operation.content.trim(),
     origin: operation.origin,
     source_turn_id: operation.source_turn_id || null,
     status: "active",

@@ -187,6 +187,158 @@ test("normalizeUpdate handles malformed provider results safely", () => {
   });
 });
 
+test("normalizeUpdate rejects invalid operation batches fail closed", () => {
+  const invalidBatches = [
+    {
+      reason: "unsupported operation type",
+      operations: [{ type: "rewrite_everything", summary: "Bad" }],
+    },
+    {
+      reason: "unsupported category",
+      operations: [{
+        type: "add_entry",
+        id: "entry-1",
+        category: "roadmap",
+        content: "Ship the beta first",
+        origin: "user_stated",
+        source_turn_id: "turn-1",
+      }],
+    },
+    {
+      reason: "missing provenance",
+      operations: [{
+        type: "add_entry",
+        id: "entry-1",
+        category: "decisions",
+        content: "Ship the beta first",
+        source_turn_id: "turn-1",
+      }],
+    },
+    {
+      reason: "malformed id",
+      operations: [{
+        type: "correct_entry",
+        id: "decision-1",
+        replacement_id: " ",
+        category: "decisions",
+        content: "Ship the beta first",
+        origin: "user_stated",
+        source_turn_id: "turn-1",
+      }],
+    },
+  ];
+
+  invalidBatches.forEach(({ reason, operations }) => {
+    assert.deepEqual(normalizeUpdate({
+      action: "update",
+      operations,
+      spoken_commit_notice: "Saved.",
+      needs_clarification: "",
+    }), {
+      action: "clarify",
+      operations: [],
+      spoken_commit_notice: "Saved.",
+      needs_clarification: "",
+    }, reason);
+  });
+});
+
+test("normalizeUpdate clones accepted operations", () => {
+  const providerOutput = {
+    action: "update",
+    operations: [{
+      type: "update_working_memory",
+      summary: "Compare rollout plans",
+      candidate_options: ["Canary"],
+    }],
+  };
+
+  const first = normalizeUpdate(providerOutput);
+  providerOutput.operations[0].summary = "Mutated provider output";
+  providerOutput.operations[0].candidate_options.push("Blue-green");
+
+  assert.deepEqual(first.operations, [{
+    type: "update_working_memory",
+    summary: "Compare rollout plans",
+    candidate_options: ["Canary"],
+  }]);
+
+  first.operations[0].summary = "Mutated returned output";
+  first.operations[0].candidate_options.push("Big bang");
+
+  providerOutput.operations[0] = {
+    type: "update_working_memory",
+    summary: "Fresh provider output",
+    candidate_options: ["Canary"],
+  };
+
+  const second = normalizeUpdate(providerOutput);
+  assert.deepEqual(second.operations, [{
+    type: "update_working_memory",
+    summary: "Fresh provider output",
+    candidate_options: ["Canary"],
+  }]);
+});
+
+test("normalizeUpdate accepts strict-schema working memory board_focus clearing operation", () => {
+  assert.deepEqual(normalizeUpdate({
+    action: "update",
+    operations: [{
+      type: "update_working_memory",
+      board_focus: null,
+    }],
+  }), {
+    action: "update",
+    operations: [{
+      type: "update_working_memory",
+      board_focus: null,
+    }],
+    spoken_commit_notice: "",
+    needs_clarification: "",
+  });
+});
+
+test("natural reasoning undo utterances are detected without catching unrelated undo talk", async () => {
+  const positiveUtterances = [
+    "please undo the last reasoning update",
+    "can you undo the previous decision",
+    "undo that last memory update",
+    "undo the last conclusion",
+  ];
+  const negativeUtterances = [
+    "I do not want to undo the last decision",
+    "explain undo memory semantics",
+    "undo the last board layout",
+  ];
+
+  for (const utterance of positiveUtterances) {
+    let providerCalled = false;
+    const result = await proposeWorkspaceUpdate({ utterance }, createWorkspace(), {
+      updateProvider: async () => {
+        providerCalled = true;
+        return { action: "update" };
+      },
+    });
+
+    assert.equal(providerCalled, false, utterance);
+    assert.equal(result.action, "undo", utterance);
+    assert.deepEqual(result.operations, [], utterance);
+  }
+
+  for (const utterance of negativeUtterances) {
+    let providerCalled = false;
+    const result = await proposeWorkspaceUpdate({ utterance }, createWorkspace(), {
+      updateProvider: async () => {
+        providerCalled = true;
+        return { action: "clarify", operations: [] };
+      },
+    });
+
+    assert.equal(providerCalled, true, utterance);
+    assert.notEqual(result.action, "undo", utterance);
+  }
+});
+
 test("API call path uses fetchImpl, selected/default model, bearer auth, JSON schema request, and parses output_text", async () => {
   const previousModel = process.env.ORCHESTRATOR_MODEL;
   process.env.ORCHESTRATOR_MODEL = "test-workspace-update-model";
@@ -246,6 +398,15 @@ test("API call path uses fetchImpl, selected/default model, bearer auth, JSON sc
     assert.equal(result.action, "update");
     assert.equal(result.operations[0].origin, "user_stated");
     assert.equal(result.spoken_commit_notice, "I saved canary as the preferred option.");
+
+    const operationItems = body.text.format.schema.properties.operations.items;
+    const operationSchemas = operationItems.anyOf || [operationItems];
+    assert.ok(operationSchemas.length > 1);
+    operationSchemas.forEach((schema) => {
+      assert.equal(schema.type, "object");
+      assert.equal(schema.additionalProperties, false);
+      assert.deepEqual(new Set(schema.required), new Set(Object.keys(schema.properties)));
+    });
   } finally {
     if (previousModel === undefined) {
       delete process.env.ORCHESTRATOR_MODEL;

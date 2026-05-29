@@ -65,6 +65,17 @@ test("planner input isolates workspace metadata from caller mutations", () => {
   });
 });
 
+test("planner input rejects array workspace metadata", () => {
+  const board = createBoardState();
+  const input = buildWhiteboardPlanInput({
+    user_goal: "Project workspace",
+    target_artifact: "idea_map",
+    workspace_context: [],
+  }, board);
+
+  assert.equal(input.workspace_context, null);
+});
+
 test("planner input includes board strategy and visual summary goal", () => {
   const board = createBoardState();
   const input = buildWhiteboardPlanInput({

@@ -59,14 +59,21 @@ test("normalizing a command isolates workspace metadata from caller mutations", 
 });
 
 test("normalizes invalid workspace metadata to safe defaults", () => {
-  const command = normalizeWhiteboardCommand({
+  const stringContextCommand = normalizeWhiteboardCommand({
     command_type: "create_artifact",
     user_goal: "Project workspace",
     workspace_context: "invalid",
   });
+  const arrayContextCommand = normalizeWhiteboardCommand({
+    command_type: "create_artifact",
+    user_goal: "Project workspace",
+    workspace_context: [],
+  });
 
-  assert.equal(command.workspace_context, null);
-  assert.equal(command.sync_reason, null);
+  assert.equal(stringContextCommand.workspace_context, null);
+  assert.equal(stringContextCommand.sync_reason, null);
+  assert.equal(arrayContextCommand.workspace_context, null);
+  assert.equal(arrayContextCommand.sync_reason, null);
 });
 
 test("defaults sync reason to workspace update only when workspace context is present", () => {

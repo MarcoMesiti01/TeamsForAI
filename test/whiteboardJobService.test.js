@@ -123,6 +123,45 @@ test("planner provider mutations cannot leak into job command or original worksp
   });
 });
 
+test("listed whiteboard jobs isolate serialized state from caller mutations", async () => {
+  const state = { board: createBoardState(), whiteboard_jobs: [] };
+  const job = createWhiteboardJob(state, {
+    command_type: "create_artifact",
+    artifact_type: "idea_map",
+    user_goal: "Project committed workspace",
+    workspace_context: {
+      active_entries: {
+        options: [{ id: "option-canary", content: "Use canary rollout", status: "committed" }],
+      },
+    },
+  }, { autoStart: false });
+
+  await runWhiteboardJob(state, job.job_id, {
+    plannerOptions: {
+      plannerProvider: async () => ({
+        spoken_summary: "Projected workspace",
+        reasoning_summary: "Created a node for the committed option.",
+        layout_notes: "Single node",
+        missing_info: [],
+        board_operations: [
+          { type: "create_node", id: "node-option", text: "Use canary rollout", x: 120, y: 90 },
+        ],
+      }),
+    },
+  });
+
+  const [serialized] = listWhiteboardJobs(state);
+  serialized.command.workspace_context.active_entries.options[0].content = "Mutated list result";
+  serialized.board_operations.push({ type: "create_node", id: "node-extra", text: "Extra", x: 0, y: 0 });
+  serialized.board_state.nodes[0].text = "Mutated board snapshot";
+  serialized.target_resolution = { targets: ["mutated"] };
+
+  assert.equal(job.command.workspace_context.active_entries.options[0].content, "Use canary rollout");
+  assert.equal(job.board_operations.length, 1);
+  assert.equal(job.board_state.nodes[0].text, "Use canary rollout");
+  assert.notDeepEqual(job.target_resolution, { targets: ["mutated"] });
+});
+
 test("needs-clarification job leaves synchronization pending and board unchanged", async () => {
   const state = { board: createBoardState(), whiteboard_jobs: [] };
   const job = createWhiteboardJob(state, {

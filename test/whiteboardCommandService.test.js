@@ -69,11 +69,25 @@ test("normalizes invalid workspace metadata to safe defaults", () => {
     user_goal: "Project workspace",
     workspace_context: [],
   });
+  const dateContextCommand = normalizeWhiteboardCommand({
+    command_type: "create_artifact",
+    user_goal: "Project workspace",
+    workspace_context: new Date("2026-01-01T00:00:00.000Z"),
+  });
+  const mapContextCommand = normalizeWhiteboardCommand({
+    command_type: "create_artifact",
+    user_goal: "Project workspace",
+    workspace_context: new Map([["active_entries", {}]]),
+  });
 
   assert.equal(stringContextCommand.workspace_context, null);
   assert.equal(stringContextCommand.sync_reason, null);
   assert.equal(arrayContextCommand.workspace_context, null);
   assert.equal(arrayContextCommand.sync_reason, null);
+  assert.equal(dateContextCommand.workspace_context, null);
+  assert.equal(dateContextCommand.sync_reason, null);
+  assert.equal(mapContextCommand.workspace_context, null);
+  assert.equal(mapContextCommand.sync_reason, null);
 });
 
 test("defaults sync reason to workspace update only when workspace context is present", () => {

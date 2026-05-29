@@ -65,15 +65,19 @@ test("planner input isolates workspace metadata from caller mutations", () => {
   });
 });
 
-test("planner input rejects array workspace metadata", () => {
+test("planner input rejects non-plain workspace metadata", () => {
   const board = createBoardState();
-  const input = buildWhiteboardPlanInput({
-    user_goal: "Project workspace",
-    target_artifact: "idea_map",
-    workspace_context: [],
-  }, board);
+  const contexts = [[], new Date("2026-01-01T00:00:00.000Z"), new Map([["active_entries", {}]]), /workspace/];
 
-  assert.equal(input.workspace_context, null);
+  contexts.forEach((workspaceContext) => {
+    const input = buildWhiteboardPlanInput({
+      user_goal: "Project workspace",
+      target_artifact: "idea_map",
+      workspace_context: workspaceContext,
+    }, board);
+
+    assert.equal(input.workspace_context, null);
+  });
 });
 
 test("planner input includes board strategy and visual summary goal", () => {

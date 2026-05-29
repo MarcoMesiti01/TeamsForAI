@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { createBoardState } = require("../lib/boardState");
+const { createBoardState, applyBoardOperations, getBoardSnapshot } = require("../lib/boardState");
 const {
   createWhiteboardJob,
   runWhiteboardJob,
@@ -46,6 +46,10 @@ test("completed whiteboard job applies one undoable board checkpoint", async () 
 
 test("failed planner output marks job failed and leaves board unchanged", async () => {
   const state = { board: createBoardState(), whiteboard_jobs: [] };
+  applyBoardOperations(state.board, [
+    { type: "create_node", id: "node-existing", text: "Existing idea", x: 120, y: 80 },
+  ]);
+  const boardSnapshotBeforeFailure = getBoardSnapshot(state.board);
   const job = createWhiteboardJob(state, {
     command_type: "create_artifact",
     artifact_type: "idea_map",
@@ -70,8 +74,53 @@ test("failed planner output marks job failed and leaves board unchanged", async 
   assert.equal(job.status, "failed");
   assert.equal(job.sync_status, "failed");
   assert.equal(listWhiteboardJobs(state)[0].sync_status, "failed");
-  assert.equal(state.board.nodes.length, 0);
+  assert.deepEqual(getBoardSnapshot(state.board), boardSnapshotBeforeFailure);
+  assert.deepEqual(job.board_state, boardSnapshotBeforeFailure);
   assert.match(job.error, /invalid operations/i);
+});
+
+test("planner provider mutations cannot leak into job command or original workspace metadata", async () => {
+  const state = { board: createBoardState(), whiteboard_jobs: [] };
+  const workspaceContext = {
+    active_entries: {
+      options: [{ id: "option-canary", content: "Use canary rollout", status: "committed" }],
+    },
+  };
+  const job = createWhiteboardJob(state, {
+    command_type: "create_artifact",
+    artifact_type: "idea_map",
+    user_goal: "Project committed workspace",
+    workspace_context: workspaceContext,
+  }, { autoStart: false });
+
+  await runWhiteboardJob(state, job.job_id, {
+    plannerOptions: {
+      plannerProvider: async (input) => {
+        input.workspace_context.active_entries.options[0].content = "Mutated inside provider";
+        input.workspace_context.active_entries.options.push({ id: "option-new", content: "New provider option" });
+        return {
+          spoken_summary: "Projected workspace",
+          reasoning_summary: "Created a node for the committed option.",
+          layout_notes: "Single node",
+          missing_info: [],
+          board_operations: [
+            { type: "create_node", id: "node-option", text: "Use canary rollout", x: 120, y: 90 },
+          ],
+        };
+      },
+    },
+  });
+
+  assert.deepEqual(job.command.workspace_context, {
+    active_entries: {
+      options: [{ id: "option-canary", content: "Use canary rollout", status: "committed" }],
+    },
+  });
+  assert.deepEqual(workspaceContext, {
+    active_entries: {
+      options: [{ id: "option-canary", content: "Use canary rollout", status: "committed" }],
+    },
+  });
 });
 
 test("needs-clarification job leaves synchronization pending and board unchanged", async () => {

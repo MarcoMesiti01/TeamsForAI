@@ -37,6 +37,34 @@ test("builds planner input with board snapshot, supported operations, layout con
   assert.deepEqual(input.workspace_context, workspaceContext);
 });
 
+test("planner input isolates workspace metadata from caller mutations", () => {
+  const board = createBoardState();
+  const workspaceContext = {
+    active_entries: {
+      objectives: [{ id: "objective-growth", content: "Reduce churn", status: "committed" }],
+    },
+  };
+  const input = buildWhiteboardPlanInput({
+    user_goal: "Project workspace",
+    target_artifact: "idea_map",
+    workspace_context: workspaceContext,
+  }, board);
+
+  workspaceContext.active_entries.objectives[0].content = "Mutated original";
+  input.workspace_context.active_entries.objectives[0].status = "mutated-input";
+
+  assert.deepEqual(input.workspace_context, {
+    active_entries: {
+      objectives: [{ id: "objective-growth", content: "Reduce churn", status: "mutated-input" }],
+    },
+  });
+  assert.deepEqual(workspaceContext, {
+    active_entries: {
+      objectives: [{ id: "objective-growth", content: "Mutated original", status: "committed" }],
+    },
+  });
+});
+
 test("planner input includes board strategy and visual summary goal", () => {
   const board = createBoardState();
   const input = buildWhiteboardPlanInput({

@@ -36,6 +36,28 @@ test("normalizes valid whiteboard command JSON", () => {
   assert.equal(command.sync_reason, "reasoning_turn");
 });
 
+test("normalizing a command isolates workspace metadata from caller mutations", () => {
+  const workspaceContext = {
+    active_entries: {
+      options: [{ id: "option-canary", content: "Use canary rollout", status: "committed" }],
+    },
+  };
+  const command = normalizeWhiteboardCommand({
+    command_type: "create_artifact",
+    user_goal: "Project workspace",
+    workspace_context: workspaceContext,
+  });
+
+  workspaceContext.active_entries.options[0].content = "Mutated after normalize";
+  workspaceContext.active_entries.options.push({ id: "option-fast", content: "Ship faster", status: "draft" });
+
+  assert.deepEqual(command.workspace_context, {
+    active_entries: {
+      options: [{ id: "option-canary", content: "Use canary rollout", status: "committed" }],
+    },
+  });
+});
+
 test("normalizes invalid workspace metadata to safe defaults", () => {
   const command = normalizeWhiteboardCommand({
     command_type: "create_artifact",

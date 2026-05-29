@@ -77,6 +77,71 @@ test("created nodes default provenance metadata to exploratory", () => {
   assert.equal(board.nodes[0].origin, null);
 });
 
+test("create node sanitizes invalid workspace provenance metadata before persistence", () => {
+  const board = createBoardState();
+  applyBoardOperations(board, [
+    {
+      type: "create_node",
+      id: "node-invalid",
+      text: "Invalid metadata",
+      x: 0,
+      y: 0,
+      workspace_entry_id: { id: "entry-object" },
+      memory_status: "archived",
+      origin: "",
+    },
+  ], { source: "ai" });
+
+  assert.equal(board.nodes[0].workspace_entry_id, null);
+  assert.equal(board.nodes[0].memory_status, "exploratory");
+  assert.equal(board.nodes[0].origin, null);
+  assert.equal(board.operation_log[0].workspace_entry_id, null);
+  assert.equal(board.operation_log[0].memory_status, "exploratory");
+  assert.equal(board.operation_log[0].origin, null);
+});
+
+test("update node sanitizes provided provenance while preserving absent metadata", () => {
+  const board = createBoardState();
+  applyBoardOperations(board, [
+    {
+      type: "create_node",
+      id: "node-option",
+      text: "Use canary rollout",
+      x: 0,
+      y: 0,
+      workspace_entry_id: "option-canary",
+      memory_status: "committed",
+      origin: "user_stated",
+    },
+  ], { source: "ai" });
+
+  applyBoardOperations(board, [
+    {
+      type: "update_node",
+      id: "node-option",
+      workspace_entry_id: [],
+      memory_status: "pending",
+      origin: 42,
+    },
+  ], { source: "ai" });
+
+  assert.equal(board.nodes[0].workspace_entry_id, null);
+  assert.equal(board.nodes[0].memory_status, "exploratory");
+  assert.equal(board.nodes[0].origin, null);
+
+  applyBoardOperations(board, [
+    { type: "update_node", id: "node-option", text: "Use staged rollout" },
+  ], { source: "ai" });
+
+  assert.equal(board.nodes[0].text, "Use staged rollout");
+  assert.equal(board.nodes[0].workspace_entry_id, null);
+  assert.equal(board.nodes[0].memory_status, "exploratory");
+  assert.equal(board.nodes[0].origin, null);
+  assert.equal("workspace_entry_id" in board.operation_log.at(-1), false);
+  assert.equal("memory_status" in board.operation_log.at(-1), false);
+  assert.equal("origin" in board.operation_log.at(-1), false);
+});
+
 test("undo restores the board snapshot while preserving operation history", () => {
   const board = createBoardState();
   applyBoardOperations(board, [

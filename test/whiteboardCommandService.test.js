@@ -66,6 +66,20 @@ test("normalizes invalid workspace metadata to safe defaults", () => {
   });
 
   assert.equal(command.workspace_context, null);
+  assert.equal(command.sync_reason, null);
+});
+
+test("defaults sync reason to workspace update only when workspace context is present", () => {
+  const command = normalizeWhiteboardCommand({
+    command_type: "create_artifact",
+    user_goal: "Project workspace",
+    workspace_context: {
+      active_entries: {
+        options: [{ id: "option-canary", content: "Use canary rollout", status: "committed" }],
+      },
+    },
+  });
+
   assert.equal(command.sync_reason, "workspace_update");
 });
 

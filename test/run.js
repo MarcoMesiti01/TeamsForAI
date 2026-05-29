@@ -13,3 +13,4 @@ require("./workspaceContext.test");
 require("./workspaceUpdateService.test");
 require("./workspaceResponseService.test");
 require("./turnCoordinatorService.test");
+require("./serverWorkspaceFlow.test");

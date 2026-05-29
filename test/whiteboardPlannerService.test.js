@@ -6,6 +6,11 @@ const { buildWhiteboardPlanInput, planWhiteboardOperations } = require("../lib/w
 
 test("builds planner input with board snapshot, supported operations, layout constraints, and session context", () => {
   const board = createBoardState();
+  const workspaceContext = {
+    active_entries: {
+      options: [{ id: "option-canary", content: "Use canary rollout", status: "committed" }],
+    },
+  };
   applyBoardOperations(board, [
     { type: "create_node", id: "node-existing", text: "Existing idea", x: 120, y: 80 },
   ]);
@@ -16,6 +21,7 @@ test("builds planner input with board snapshot, supported operations, layout con
     target_artifact: "idea_map",
     artifact_description: "Add a compact expansion around the existing idea.",
     known_context: "The user moved the first node to the top-left.",
+    workspace_context: workspaceContext,
   }, board, {
     layout_constraints: { canvas_width: 1400, canvas_height: 900, min_node_spacing: 180 },
   });
@@ -28,6 +34,7 @@ test("builds planner input with board snapshot, supported operations, layout con
   assert.ok(input.supported_operation_types.includes("delete_item"));
   assert.equal(input.layout_constraints.canvas_width, 1400);
   assert.match(input.compact_session_context, /top-left/);
+  assert.deepEqual(input.workspace_context, workspaceContext);
 });
 
 test("planner input includes board strategy and visual summary goal", () => {
@@ -44,6 +51,58 @@ test("planner input includes board strategy and visual summary goal", () => {
   assert.equal(input.artifact_type, "process_flow");
   assert.equal(input.board_strategy, "create_new_group");
   assert.equal(input.visual_summary_goal, "Show onboarding as ordered steps.");
+});
+
+test("planner model request includes workspace projection guidance", async () => {
+  const board = createBoardState();
+  let requestBody = null;
+
+  await planWhiteboardOperations({
+    intent_type: "develop_idea_map",
+    user_goal: "Project committed workspace entries",
+    target_artifact: "idea_map",
+    should_use_whiteboard: true,
+    workspace_context: {
+      active_entries: {
+        options: [{ id: "option-canary", content: "Use canary rollout", status: "committed" }],
+      },
+    },
+  }, board, {
+    apiKey: "test-key",
+    fetchImpl: async (_url, request) => {
+      requestBody = JSON.parse(request.body);
+      return {
+        ok: true,
+        json: async () => ({
+          output_text: JSON.stringify({
+            spoken_summary: "Projected workspace",
+            reasoning_summary: "Used active committed entries.",
+            layout_notes: "Updated existing related nodes where possible.",
+            missing_info: [],
+            board_operations: [
+              {
+                type: "create_node",
+                id: "node-option",
+                text: "Use canary rollout",
+                x: 120,
+                y: 90,
+                workspace_entry_id: "option-canary",
+                memory_status: "committed",
+                origin: "workspace",
+              },
+            ],
+          }),
+        }),
+      };
+    },
+  });
+
+  const systemPrompt = requestBody.input.find((message) => message.role === "system").content;
+  const userInput = JSON.parse(requestBody.input.find((message) => message.role === "user").content);
+  assert.match(systemPrompt, /active committed workspace entries are authoritative/i);
+  assert.match(systemPrompt, /reuse\/update related nodes/i);
+  assert.match(systemPrompt, /workspace_entry_id, memory_status, origin/i);
+  assert.equal(userInput.workspace_context.active_entries.options[0].id, "option-canary");
 });
 
 test("planner uses strict JSON planner output when operations validate", async () => {

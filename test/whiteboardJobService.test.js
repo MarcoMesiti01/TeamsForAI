@@ -18,9 +18,11 @@ test("submitting a whiteboard command creates a queued job with immediate acknow
   }, { autoStart: false });
 
   assert.equal(job.status, "queued");
+  assert.equal(job.sync_status, "pending");
   assert.equal(typeof job.job_id, "string");
   assert.match(job.spoken_ack, /update the board/i);
   assert.equal(listWhiteboardJobs(state).length, 1);
+  assert.equal(listWhiteboardJobs(state)[0].sync_status, "pending");
 });
 
 test("completed whiteboard job applies one undoable board checkpoint", async () => {
@@ -35,6 +37,8 @@ test("completed whiteboard job applies one undoable board checkpoint", async () 
   await runWhiteboardJob(state, job.job_id, { plannerOptions: { apiKey: "" } });
 
   assert.equal(job.status, "completed");
+  assert.equal(job.sync_status, "synchronized");
+  assert.equal(listWhiteboardJobs(state)[0].sync_status, "synchronized");
   assert.equal(job.board_state.nodes.length > 0, true);
   assert.equal(state.board.undo_stack.length, 1);
   assert.equal(typeof job.undo_checkpoint_id, "string");
@@ -64,6 +68,24 @@ test("failed planner output marks job failed and leaves board unchanged", async 
   });
 
   assert.equal(job.status, "failed");
+  assert.equal(job.sync_status, "failed");
+  assert.equal(listWhiteboardJobs(state)[0].sync_status, "failed");
   assert.equal(state.board.nodes.length, 0);
   assert.match(job.error, /invalid operations/i);
+});
+
+test("needs-clarification job leaves synchronization pending and board unchanged", async () => {
+  const state = { board: createBoardState(), whiteboard_jobs: [] };
+  const job = createWhiteboardJob(state, {
+    command_type: "delete_item",
+    user_goal: "Maybe delete something",
+    target_confidence: 0.3,
+    allow_destructive: true,
+  }, { autoStart: false });
+
+  await runWhiteboardJob(state, job.job_id);
+
+  assert.equal(job.status, "needs_clarification");
+  assert.equal(job.sync_status, "pending");
+  assert.equal(state.board.nodes.length, 0);
 });

@@ -10,6 +10,11 @@ const {
 } = require("../lib/whiteboardCommandService");
 
 test("normalizes valid whiteboard command JSON", () => {
+  const workspaceContext = {
+    active_entries: {
+      options: [{ id: "option-canary", content: "Use canary rollout", status: "committed" }],
+    },
+  };
   const command = normalizeWhiteboardCommand({
     command_type: "modify_item",
     artifact_type: "idea_map",
@@ -18,6 +23,8 @@ test("normalizes valid whiteboard command JSON", () => {
     target_confidence: 0.82,
     change_description: "Rename it to Pricing strategy",
     constraints: { preserve_layout: true },
+    workspace_context: workspaceContext,
+    sync_reason: "reasoning_turn",
   });
 
   assert.equal(command.command_type, "modify_item");
@@ -25,6 +32,19 @@ test("normalizes valid whiteboard command JSON", () => {
   assert.equal(command.target_selector.text, "Pricing");
   assert.equal(command.target_confidence, 0.82);
   assert.equal(command.allow_destructive, false);
+  assert.deepEqual(command.workspace_context, workspaceContext);
+  assert.equal(command.sync_reason, "reasoning_turn");
+});
+
+test("normalizes invalid workspace metadata to safe defaults", () => {
+  const command = normalizeWhiteboardCommand({
+    command_type: "create_artifact",
+    user_goal: "Project workspace",
+    workspace_context: "invalid",
+  });
+
+  assert.equal(command.workspace_context, null);
+  assert.equal(command.sync_reason, "workspace_update");
 });
 
 test("rejects unsupported whiteboard command types", () => {
@@ -35,6 +55,11 @@ test("rejects unsupported whiteboard command types", () => {
 });
 
 test("builds command JSON from board-first orchestrator intent", () => {
+  const workspaceContext = {
+    active_entries: {
+      objectives: [{ id: "objective-growth", content: "Reduce churn", status: "committed" }],
+    },
+  };
   const command = buildWhiteboardCommandFromIntent({
     user_goal: "Describe the onboarding process",
     artifact_type: "process_flow",
@@ -43,12 +68,16 @@ test("builds command JSON from board-first orchestrator intent", () => {
     board_strategy: "create_new_group",
     visual_summary_goal: "Show onboarding as ordered steps.",
     confidence: 0.76,
+    workspace_context: workspaceContext,
+    sync_reason: "committed_workspace_change",
   });
 
   assert.equal(command.command_type, "create_artifact");
   assert.equal(command.artifact_type, "process_flow");
   assert.equal(command.board_strategy, "create_new_group");
   assert.equal(command.target_confidence, 0.76);
+  assert.deepEqual(command.workspace_context, workspaceContext);
+  assert.equal(command.sync_reason, "committed_workspace_change");
 });
 
 test("resolves command targets by id, selected item, text, group, and semantic fallback", () => {
@@ -138,4 +167,41 @@ test("modify and connect commands produce raw operations from resolved targets",
   assert.equal(connect.board_operations[0].type, "create_edge");
   assert.equal(connect.board_operations[0].from, "node-pricing");
   assert.equal(connect.board_operations[0].to, "node-onboarding");
+});
+
+test("create artifact planning passes workspace metadata into planner input", async () => {
+  const board = createBoardState();
+  const workspaceContext = {
+    active_entries: {
+      options: [{ id: "option-canary", content: "Use canary rollout", status: "committed" }],
+    },
+  };
+  let receivedInput = null;
+
+  const result = await planOperationsForCommand(normalizeWhiteboardCommand({
+    command_type: "create_artifact",
+    user_goal: "Project committed workspace",
+    artifact_type: "idea_map",
+    workspace_context: workspaceContext,
+    sync_reason: "reasoning_turn",
+  }), board, {
+    plannerOptions: {
+      plannerProvider: async (input) => {
+        receivedInput = input;
+        return {
+          spoken_summary: "Projected workspace",
+          reasoning_summary: "Created a node for the committed option.",
+          layout_notes: "Single node",
+          missing_info: [],
+          board_operations: [
+            { type: "create_node", id: "node-option", text: "Use canary rollout", x: 120, y: 90 },
+          ],
+        };
+      },
+    },
+  });
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(receivedInput.workspace_context, workspaceContext);
+  assert.equal(receivedInput.sync_reason, "reasoning_turn");
 });

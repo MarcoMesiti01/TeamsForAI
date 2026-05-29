@@ -22,6 +22,61 @@ test("applies idea-map operations and records them in an append-only log", () =>
   assert.equal(board.undo_stack[0].checkpoint_id, result.undo_checkpoint_id);
 });
 
+test("create and update node retain workspace provenance metadata", () => {
+  const board = createBoardState();
+
+  applyBoardOperations(board, [
+    {
+      type: "create_node",
+      id: "node-option",
+      text: "Use canary rollout",
+      x: 120,
+      y: 80,
+      workspace_entry_id: "option-canary",
+      memory_status: "committed",
+      origin: "workspace",
+    },
+  ], { source: "ai" });
+
+  assert.equal(board.nodes[0].workspace_entry_id, "option-canary");
+  assert.equal(board.nodes[0].memory_status, "committed");
+  assert.equal(board.nodes[0].origin, "workspace");
+
+  applyBoardOperations(board, [
+    { type: "update_node", id: "node-option", text: "Use staged rollout" },
+  ], { source: "ai" });
+
+  assert.equal(board.nodes[0].text, "Use staged rollout");
+  assert.equal(board.nodes[0].workspace_entry_id, "option-canary");
+  assert.equal(board.nodes[0].memory_status, "committed");
+  assert.equal(board.nodes[0].origin, "workspace");
+
+  applyBoardOperations(board, [
+    {
+      type: "update_node",
+      id: "node-option",
+      workspace_entry_id: "option-rollout",
+      memory_status: "exploratory",
+      origin: "voice",
+    },
+  ], { source: "ai" });
+
+  assert.equal(board.nodes[0].workspace_entry_id, "option-rollout");
+  assert.equal(board.nodes[0].memory_status, "exploratory");
+  assert.equal(board.nodes[0].origin, "voice");
+});
+
+test("created nodes default provenance metadata to exploratory", () => {
+  const board = createBoardState();
+  applyBoardOperations(board, [
+    { type: "create_node", id: "node-idea", text: "New idea", x: 0, y: 0 },
+  ], { source: "ai" });
+
+  assert.equal(board.nodes[0].workspace_entry_id, null);
+  assert.equal(board.nodes[0].memory_status, "exploratory");
+  assert.equal(board.nodes[0].origin, null);
+});
+
 test("undo restores the board snapshot while preserving operation history", () => {
   const board = createBoardState();
   applyBoardOperations(board, [

@@ -8,6 +8,9 @@ const transcriptEl = document.getElementById("transcript");
 const undoBtn = document.getElementById("undoBtn");
 const boardStatusEl = document.getElementById("boardStatus");
 const boardEl = document.getElementById("board");
+const workspaceLedgerEl = document.getElementById("workspaceLedger");
+const workspaceStatusEl = document.getElementById("workspaceStatus");
+const reasoningUndoBtn = document.getElementById("reasoningUndoBtn");
 const clientSessionId = crypto.randomUUID();
 
 let pc;
@@ -24,6 +27,18 @@ let dragState = null;
 const pendingWhiteboardJobs = new Set();
 const completedWhiteboardJobs = new Set();
 let boardJobPollTimer = null;
+
+const WORKSPACE_LABELS = {
+  problem: "Problem",
+  objectives: "Objectives",
+  assumptions: "Assumptions",
+  constraints: "Constraints",
+  options: "Options",
+  decisions: "Decisions",
+  open_questions: "Open Questions",
+  risks: "Risks",
+  next_steps: "Next Steps",
+};
 
 function setStatus(text) {
   statusEl.textContent = `Status: ${text}`;
@@ -114,6 +129,67 @@ function clearElement(element) {
   while (element.firstChild) {
     element.removeChild(element.firstChild);
   }
+}
+
+function renderWorkspace(workspaceState = {}) {
+  clearElement(workspaceLedgerEl);
+
+  const activeEntries = (workspaceState.entries || []).filter((entry) => entry?.status === "active");
+  reasoningUndoBtn.disabled = !workspaceState.can_undo;
+
+  if (!activeEntries.length) {
+    workspaceStatusEl.textContent = "No committed reasoning yet.";
+    const empty = document.createElement("p");
+    empty.className = "ledger-empty";
+    empty.textContent = "Committed reasoning will appear here as the assistant records durable facts, options, and decisions.";
+    workspaceLedgerEl.appendChild(empty);
+    return;
+  }
+
+  workspaceStatusEl.textContent = `${activeEntries.length} committed reasoning item${activeEntries.length === 1 ? "" : "s"}.`;
+
+  const categories = [...new Set(activeEntries.map((entry) => entry.category || "uncategorized"))];
+  categories.forEach((category) => {
+    const section = document.createElement("section");
+    section.className = "ledger-section";
+
+    const title = document.createElement("h3");
+    title.textContent = WORKSPACE_LABELS[category] || category.replaceAll("_", " ");
+    section.appendChild(title);
+
+    activeEntries
+      .filter((entry) => (entry.category || "uncategorized") === category)
+      .forEach((entry) => {
+        const item = document.createElement("article");
+        const origin = entry.origin === "ai_inferred" ? "ai_inferred" : "user_stated";
+        item.className = `ledger-entry ${origin}`;
+
+        const content = document.createElement("p");
+        content.textContent = entry.content || "";
+        item.appendChild(content);
+
+        const provenance = document.createElement("span");
+        provenance.className = "ledger-provenance";
+        provenance.textContent = origin === "ai_inferred" ? "ai_inferred" : "user_stated";
+        item.appendChild(provenance);
+
+        section.appendChild(item);
+      });
+
+    workspaceLedgerEl.appendChild(section);
+  });
+}
+
+function updateRealtimeBriefing(instructions) {
+  if (!instructions || !dc || dc.readyState !== "open") return;
+
+  dc.send(JSON.stringify({
+    type: "session.update",
+    session: {
+      type: "realtime",
+      instructions,
+    },
+  }));
 }
 
 function createSvgElement(name, attrs = {}) {
@@ -260,7 +336,8 @@ function renderBoard(boardState) {
 
   boardState.nodes.forEach((node) => {
     const item = document.createElement("article");
-    item.className = `board-node ${node.emphasis === "primary" ? "primary" : ""}`;
+    const memoryStatus = node.memory_status || "exploratory";
+    item.className = `board-node ${memoryStatus} ${node.emphasis === "primary" ? "primary" : ""}`;
     item.dataset.nodeId = node.id;
     item.style.left = `${Number(node.x || 0)}px`;
     item.style.top = `${Number(node.y || 0)}px`;
@@ -273,7 +350,11 @@ function renderBoard(boardState) {
 
     const meta = document.createElement("p");
     meta.className = "node-meta";
-    meta.textContent = node.emphasis === "primary" ? "Primary thought" : "Idea node";
+    if (memoryStatus === "committed") {
+      meta.textContent = node.origin === "ai_inferred" ? "Inferred workspace item" : "Stated workspace item";
+    } else {
+      meta.textContent = "Exploratory thought";
+    }
     item.appendChild(meta);
 
     item.addEventListener("pointerdown", startNodeDrag);
@@ -403,11 +484,19 @@ async function executeToolCall(name, rawArguments, callId) {
       renderBoard(output.board_state);
     }
 
+    if (output?.workspace_state) {
+      renderWorkspace(output.workspace_state);
+    }
+
+    if (output?.realtime_session_instructions) {
+      updateRealtimeBriefing(output.realtime_session_instructions);
+    }
+
     if (output?.whiteboard_job) {
       trackWhiteboardJob(output.whiteboard_job);
     }
 
-    if (name === "delegate_to_orchestrator" || name === "route_user_intent" || name === "delegate_to_brain" || name === "submit_whiteboard_command") {
+    if (name === "delegate_to_orchestrator" || name === "route_user_intent" || name === "delegate_to_brain" || name === "submit_whiteboard_command" || name === "coordinate_reasoning_turn") {
       appendDebug(`handled_by=${output?.handled_by || "unknown"}`);
       if (output?.intent?.intent_type) {
         appendDebug(`intent=${output.intent.intent_type}`);
@@ -424,6 +513,17 @@ async function executeToolCall(name, rawArguments, callId) {
   }
 }
 
+async function loadWorkspace() {
+  try {
+    const resp = await fetch(`/workspace/state?client_session_id=${encodeURIComponent(clientSessionId)}`);
+    const output = await resp.json();
+    renderWorkspace(output);
+  } catch (error) {
+    renderWorkspace({ version: 0, entries: [], working_memory: {}, can_undo: false });
+    appendLine("system", `Workspace load failed: ${error.message}`);
+  }
+}
+
 async function undoBoard() {
   try {
     const resp = await fetch("/board/undo", {
@@ -436,6 +536,34 @@ async function undoBoard() {
     appendLine("system", output.ok ? "Undid the last board change." : "Nothing to undo.");
   } catch (error) {
     appendLine("system", `Undo failed: ${error.message}`);
+  }
+}
+
+async function undoReasoning() {
+  try {
+    const resp = await fetch("/workspace/undo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_session_id: clientSessionId }),
+    });
+    const output = await resp.json();
+
+    if (output?.workspace_state) {
+      renderWorkspace(output.workspace_state);
+    }
+    if (output?.whiteboard_job) {
+      trackWhiteboardJob(output.whiteboard_job);
+    }
+    if (output?.realtime_session_instructions) {
+      updateRealtimeBriefing(output.realtime_session_instructions);
+    }
+    if (output?.board_state) {
+      renderBoard(output.board_state);
+    }
+
+    appendLine("system", output.ok ? "Undid the last committed reasoning change." : "No committed reasoning to undo.");
+  } catch (error) {
+    appendLine("system", `Reasoning undo failed: ${error.message}`);
   }
 }
 
@@ -617,7 +745,10 @@ connectBtn.addEventListener("click", connect);
 disconnectBtn.addEventListener("click", disconnect);
 micBtn.addEventListener("click", toggleMic);
 undoBtn.addEventListener("click", undoBoard);
+reasoningUndoBtn.addEventListener("click", undoReasoning);
 window.addEventListener("pointermove", moveDraggedNode);
 window.addEventListener("pointerup", finishNodeDrag);
 window.addEventListener("pointercancel", finishNodeDrag);
 renderBoard({ version: 0, nodes: [], edges: [], groups: [], can_undo: false });
+renderWorkspace({ version: 0, entries: [], working_memory: {}, can_undo: false });
+void loadWorkspace();

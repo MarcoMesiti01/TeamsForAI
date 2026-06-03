@@ -5,6 +5,7 @@ const path = require("path");
 
 const html = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
 const appJs = fs.readFileSync(path.join(__dirname, "..", "public", "app.js"), "utf8");
+const css = fs.readFileSync(path.join(__dirname, "..", "public", "style.css"), "utf8");
 
 test("frontend renders command pane with model and settings selectors", () => {
   assert.match(html, /class="app-shell"/, "root layout should use the full-screen app shell");
@@ -46,10 +47,19 @@ test("frontend includes a committed workspace ledger and reasoning undo", () => 
   assert.match(appJs, /\/workspace\/state\?client_session_id=/);
   assert.match(appJs, /session\.update/);
   assert.match(appJs, /coordinate_reasoning_turn/);
+  assert.match(appJs, /reasoningUndoInFlight/, "reasoning undo should be guarded while a request is in flight");
+  assert.match(appJs, /Array\.isArray\(workspaceState\.entries\)/, "workspace rendering should tolerate malformed entries");
 });
 
 test("frontend labels tentative and committed board nodes", () => {
   assert.match(appJs, /memory_status/);
   assert.match(appJs, /exploratory/);
   assert.match(appJs, /committed/);
+  assert.match(appJs, /node\.memory_status === "committed" \? "committed" : "exploratory"/);
+});
+
+test("frontend offsets board content away from the workspace ledger", () => {
+  assert.match(css, /\.workspace-ledger[\s\S]*width: 300px;/);
+  assert.match(css, /\.board[\s\S]*width: calc\(100% - 320px\);[\s\S]*margin-left: 320px;/);
+  assert.match(css, /@media \(max-width: 760px\)[\s\S]*\.board[\s\S]*width: 100%;[\s\S]*margin-left: 0;/);
 });

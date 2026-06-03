@@ -77,8 +77,9 @@ body {
   position: relative;
   min-width: 1200px;
   min-height: 900px;
-  width: 100%;
+  width: calc(100% - 320px);
   height: 100%;
+  margin-left: 320px;
   overflow: hidden;
   background:
     linear-gradient(rgba(25, 37, 54, 0.06) 1px, transparent 1px),
@@ -91,7 +92,7 @@ body {
 .board-empty {
   position: absolute;
   top: 96px;
-  left: 344px;
+  left: 24px;
   margin: 0;
   padding: 0.7rem 0.85rem;
   border: 1px solid rgba(95, 111, 132, 0.18);
@@ -489,6 +490,11 @@ button[disabled] {
     min-height: 520px;
     border-radius: 8px;
     overflow: auto;
+  }
+
+  .board {
+    width: 100%;
+    margin-left: 0;
   }
 
   .board-empty {

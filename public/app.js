@@ -27,6 +27,8 @@ let dragState = null;
 const pendingWhiteboardJobs = new Set();
 const completedWhiteboardJobs = new Set();
 let boardJobPollTimer = null;
+let reasoningUndoInFlight = false;
+let currentWorkspaceCanUndo = false;
 
 const WORKSPACE_LABELS = {
   problem: "Problem",
@@ -134,8 +136,10 @@ function clearElement(element) {
 function renderWorkspace(workspaceState = {}) {
   clearElement(workspaceLedgerEl);
 
-  const activeEntries = (workspaceState.entries || []).filter((entry) => entry?.status === "active");
-  reasoningUndoBtn.disabled = !workspaceState.can_undo;
+  const entries = Array.isArray(workspaceState.entries) ? workspaceState.entries : [];
+  const activeEntries = entries.filter((entry) => entry?.status === "active");
+  currentWorkspaceCanUndo = Boolean(workspaceState.can_undo);
+  reasoningUndoBtn.disabled = reasoningUndoInFlight || !currentWorkspaceCanUndo;
 
   if (!activeEntries.length) {
     workspaceStatusEl.textContent = "No committed reasoning yet.";
@@ -148,7 +152,9 @@ function renderWorkspace(workspaceState = {}) {
 
   workspaceStatusEl.textContent = `${activeEntries.length} committed reasoning item${activeEntries.length === 1 ? "" : "s"}.`;
 
-  const categories = [...new Set(activeEntries.map((entry) => entry.category || "uncategorized"))];
+  const categories = [...new Set(activeEntries.map((entry) => {
+    return typeof entry.category === "string" && entry.category.trim() ? entry.category : "uncategorized";
+  }))];
   categories.forEach((category) => {
     const section = document.createElement("section");
     section.className = "ledger-section";
@@ -158,7 +164,12 @@ function renderWorkspace(workspaceState = {}) {
     section.appendChild(title);
 
     activeEntries
-      .filter((entry) => (entry.category || "uncategorized") === category)
+      .filter((entry) => {
+        const entryCategory = typeof entry.category === "string" && entry.category.trim()
+          ? entry.category
+          : "uncategorized";
+        return entryCategory === category;
+      })
       .forEach((entry) => {
         const item = document.createElement("article");
         const origin = entry.origin === "ai_inferred" ? "ai_inferred" : "user_stated";
@@ -336,7 +347,7 @@ function renderBoard(boardState) {
 
   boardState.nodes.forEach((node) => {
     const item = document.createElement("article");
-    const memoryStatus = node.memory_status || "exploratory";
+    const memoryStatus = node.memory_status === "committed" ? "committed" : "exploratory";
     item.className = `board-node ${memoryStatus} ${node.emphasis === "primary" ? "primary" : ""}`;
     item.dataset.nodeId = node.id;
     item.style.left = `${Number(node.x || 0)}px`;
@@ -540,6 +551,10 @@ async function undoBoard() {
 }
 
 async function undoReasoning() {
+  if (reasoningUndoInFlight || reasoningUndoBtn.disabled) return;
+
+  reasoningUndoInFlight = true;
+  reasoningUndoBtn.disabled = true;
   try {
     const resp = await fetch("/workspace/undo", {
       method: "POST",
@@ -564,6 +579,9 @@ async function undoReasoning() {
     appendLine("system", output.ok ? "Undid the last committed reasoning change." : "No committed reasoning to undo.");
   } catch (error) {
     appendLine("system", `Reasoning undo failed: ${error.message}`);
+  } finally {
+    reasoningUndoInFlight = false;
+    reasoningUndoBtn.disabled = !currentWorkspaceCanUndo;
   }
 }
 

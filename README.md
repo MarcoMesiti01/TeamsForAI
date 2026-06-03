@@ -76,6 +76,20 @@ Then open:
 6. Use **Undo** to revert the latest AI or user board operation.
 7. Use **Mute Mic** / **Disconnect** when needed.
 
+## Voice reasoning workspace
+
+Substantive spoken turns update a session-only reasoning workspace. The ledger shows the committed structured context for the current session: problem statements, objectives, constraints, assumptions, options, criteria, decisions, and open questions. The board visualizes the same reasoning so spoken continuity, ledger state, and board state stay aligned.
+
+Workspace extraction reuses `ORCHESTRATOR_MODEL`, and grounded response generation reuses `BRAIN_MODEL`. No new model-role environment variable is introduced for this workflow.
+
+### Manual voice acceptance check
+
+1. Start a live voice session and state a problem requiring structured thought.
+2. Confirm the assistant responds and the ledger/board show aligned structured context.
+3. Refer to a prior item without repeating its details; confirm continuity.
+4. Correct an inferred assumption by voice; confirm the ledger records the correction.
+5. Confirm the subsequent answer and board reflect the corrected context.
+
 ## Test
 
 ```bash

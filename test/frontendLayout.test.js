@@ -37,6 +37,7 @@ test("frontend polls asynchronous whiteboard jobs", () => {
 });
 
 test("frontend includes a committed workspace ledger and reasoning undo", () => {
+  assert.match(html, /<h2>Shared reasoning workspace<\/h2>/, "workspace ledger should have the required visible label");
   ["workspaceLedger", "workspaceStatus", "reasoningUndoBtn"].forEach((id) => {
     assert.match(html, new RegExp(`id="${id}"`), `expected #${id} in frontend markup`);
   });

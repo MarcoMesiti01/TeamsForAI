@@ -31,6 +31,7 @@ let boardJobPollTimer = null;
 let reasoningUndoInFlight = false;
 let currentWorkspaceCanUndo = false;
 let lastWorkspaceState = { version: 0, entries: [], working_memory: {}, can_undo: false };
+let latestWorkspaceSyncJobId = null;
 
 const WORKSPACE_LABELS = {
   problem: "Problem",
@@ -63,6 +64,7 @@ function appendDebug(text) {
 
 function setWorkspaceSyncStatus(job) {
   if (!job || !workspaceSyncJobs.has(job.job_id)) return;
+  if (job.job_id !== latestWorkspaceSyncJobId) return;
 
   if (job.status === "needs_clarification") {
     workspaceStatusEl.textContent = "Workspace is current; visual board update needs clarification.";
@@ -89,6 +91,7 @@ function trackWhiteboardJob(job) {
   pendingWhiteboardJobs.add(job.job_id);
   if (job.workspace_sync) {
     workspaceSyncJobs.add(job.job_id);
+    latestWorkspaceSyncJobId = job.job_id;
     setWorkspaceSyncStatus(job);
   }
   setStatus("updating board...");

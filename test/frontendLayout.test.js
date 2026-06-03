@@ -68,6 +68,8 @@ test("frontend surfaces workspace-to-board synchronization status without markin
   assert.match(appJs, /job\.workspace_sync/);
   assert.match(appJs, /job\.status === "needs_clarification"[\s\S]*visual board update needs clarification/);
   assert.match(appJs, /workspaceSyncJobs\.delete\(job\.job_id\);[\s\S]*Board update needs clarification/);
+  assert.match(appJs, /latestWorkspaceSyncJobId = job\.job_id/);
+  assert.match(appJs, /job\.job_id !== latestWorkspaceSyncJobId/);
   assert.doesNotMatch(appJs, /Workspace failed/);
 });
 

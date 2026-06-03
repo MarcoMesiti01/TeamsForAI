@@ -26,9 +26,11 @@ let currentBoardState = { version: 0, nodes: [], edges: [], groups: [], can_undo
 let dragState = null;
 const pendingWhiteboardJobs = new Set();
 const completedWhiteboardJobs = new Set();
+const workspaceSyncJobs = new Set();
 let boardJobPollTimer = null;
 let reasoningUndoInFlight = false;
 let currentWorkspaceCanUndo = false;
+let lastWorkspaceState = { version: 0, entries: [], working_memory: {}, can_undo: false };
 
 const WORKSPACE_LABELS = {
   problem: "Problem",
@@ -59,9 +61,31 @@ function appendDebug(text) {
   appendLine("system", `[debug] ${text}`);
 }
 
+function setWorkspaceSyncStatus(job) {
+  if (!job || !workspaceSyncJobs.has(job.job_id)) return;
+
+  if (job.sync_status === "pending") {
+    workspaceStatusEl.textContent = "Workspace updated; synchronizing board...";
+    return;
+  }
+
+  if (job.sync_status === "failed") {
+    workspaceStatusEl.textContent = "Workspace is current; visual board update failed.";
+    return;
+  }
+
+  if (job.sync_status === "completed") {
+    renderWorkspace(lastWorkspaceState);
+  }
+}
+
 function trackWhiteboardJob(job) {
   if (!job?.job_id) return;
   pendingWhiteboardJobs.add(job.job_id);
+  if (job.workspace_sync) {
+    workspaceSyncJobs.add(job.job_id);
+    setWorkspaceSyncStatus(job);
+  }
   setStatus("updating board...");
   appendLine("system", job.spoken_ack || "Updating board...");
   startBoardJobPolling();
@@ -95,10 +119,13 @@ async function pollWhiteboardJobs() {
         pendingWhiteboardJobs.delete(job.job_id);
         completedWhiteboardJobs.add(job.job_id);
         if (job.board_state) renderBoard(job.board_state);
+        setWorkspaceSyncStatus(job);
+        workspaceSyncJobs.delete(job.job_id);
         appendLine("system", job.spoken_summary || "Board updated.");
       }
       if (job.status === "failed" || job.status === "needs_clarification") {
         pendingWhiteboardJobs.delete(job.job_id);
+        setWorkspaceSyncStatus(job);
         appendLine("system", job.error || job.spoken_summary || "Board update needs clarification.");
       }
     });
@@ -134,6 +161,7 @@ function clearElement(element) {
 }
 
 function renderWorkspace(workspaceState = {}) {
+  lastWorkspaceState = workspaceState;
   clearElement(workspaceLedgerEl);
 
   const entries = Array.isArray(workspaceState.entries) ? workspaceState.entries : [];

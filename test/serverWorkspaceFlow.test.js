@@ -185,6 +185,44 @@ test("workspace state is isolated per client_session_id", async () => {
   });
 });
 
+test("coordinate_reasoning_turn response failure keeps workspace current and queues board sync", async () => {
+  await withServer(async (baseUrl) => {
+    setReasoningCoordinatorOptionsForTest({
+      updateProvider: async () => ({
+        action: "update",
+        operations: [{
+          type: "add_entry",
+          id: "constraint-reliability",
+          category: "constraints",
+          content: "Reliability is required",
+          origin: "user_stated",
+          source_turn_id: "turn-response-fails",
+        }],
+      }),
+      responseProvider: async () => {
+        throw new Error("reasoner unavailable");
+      },
+      routeProvider: async () => conversationalDecision(),
+    });
+
+    const result = await postJson(baseUrl, "/tools/execute", coordinateBody(
+      "response-failure-session",
+      "turn-response-fails",
+      "Reliability is required."
+    ));
+
+    assert.equal(result.response_error, "reasoner unavailable");
+    assert.equal(result.spoken_summary, "I captured the reasoning update, but I could not complete the deeper analysis yet.");
+    assert.equal(result.workspace_state.entries[0].id, "constraint-reliability");
+    assert.equal(result.workspace_state.entries[0].status, "active");
+    assert.equal(result.whiteboard_job.sync_status, "pending");
+    assert.equal(result.whiteboard_job.workspace_sync, true);
+
+    const state = await getJson(`${baseUrl}/workspace/state?client_session_id=response-failure-session`);
+    assert.equal(state.entries[0].id, "constraint-reliability");
+  });
+});
+
 test("workspace undo reverses committed memory and queues board sync only on success", async () => {
   await withServer(async (baseUrl) => {
     setReasoningCoordinatorOptionsForTest({

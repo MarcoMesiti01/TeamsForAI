@@ -330,6 +330,7 @@ app.post("/tools/execute", async (req, res) => {
           job_id: job.job_id,
           status: job.status,
           sync_status: job.sync_status,
+          workspace_sync: true,
           spoken_ack: job.spoken_ack,
         };
       }
@@ -370,6 +371,7 @@ app.post("/tools/execute", async (req, res) => {
           whiteboard_job: {
             job_id: job.job_id,
             status: job.status,
+            sync_status: job.sync_status,
             spoken_ack: job.spoken_ack,
           },
           board_state: getBoardSnapshot(state.board),
@@ -402,6 +404,7 @@ app.post("/tools/execute", async (req, res) => {
         whiteboard_job: {
           job_id: job.job_id,
           status: job.status,
+          sync_status: job.sync_status,
           spoken_ack: job.spoken_ack,
         },
         board_state: getBoardSnapshot(state.board),
@@ -467,6 +470,7 @@ app.post("/workspace/undo", (req, res) => {
       job_id: job.job_id,
       status: job.status,
       sync_status: job.sync_status,
+      workspace_sync: true,
       spoken_ack: job.spoken_ack,
     };
   }
@@ -490,6 +494,7 @@ app.post("/board/commands", (req, res) => {
       ok: true,
       job_id: job.job_id,
       status: job.status,
+      sync_status: job.sync_status,
       spoken_ack: job.spoken_ack,
       board_state: getBoardSnapshot(state.board),
     });

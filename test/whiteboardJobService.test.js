@@ -42,8 +42,8 @@ test("completed whiteboard job applies one undoable board checkpoint", async () 
   await runWhiteboardJob(state, job.job_id, { plannerOptions: { apiKey: "" } });
 
   assert.equal(job.status, "completed");
-  assert.equal(job.sync_status, "synchronized");
-  assert.equal(listWhiteboardJobs(state)[0].sync_status, "synchronized");
+  assert.equal(job.sync_status, "completed");
+  assert.equal(listWhiteboardJobs(state)[0].sync_status, "completed");
   assert.equal(job.board_state.nodes.length > 0, true);
   assert.equal(state.board.undo_stack.length, 1);
   assert.equal(typeof job.undo_checkpoint_id, "string");
@@ -58,7 +58,12 @@ test("failed planner output marks job failed and leaves board unchanged", async 
   const job = createWhiteboardJob(state, {
     command_type: "create_artifact",
     artifact_type: "idea_map",
-    user_goal: "Create invalid board",
+    user_goal: "Represent current workspace",
+    workspace_context: {
+      active_entries: {
+        objectives: [{ id: "goal-1", content: "Improve reliability" }],
+      },
+    },
   }, { autoStart: false });
 
   await runWhiteboardJob(state, job.job_id, {
@@ -235,7 +240,7 @@ test("stale workspace sync job cannot apply after a newer reasoning undo sync", 
   await oldRun;
 
   assert.equal(undoJob.status, "completed");
-  assert.equal(undoJob.sync_status, "synchronized");
+  assert.equal(undoJob.sync_status, "completed");
   assert.equal(oldJob.status, "failed");
   assert.equal(oldJob.sync_status, "failed");
   assert.match(oldJob.error, /stale workspace board sync/i);

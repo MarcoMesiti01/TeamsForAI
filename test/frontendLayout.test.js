@@ -34,6 +34,7 @@ test("frontend polls asynchronous whiteboard jobs", () => {
   assert.match(appJs, /pendingWhiteboardJobs/, "frontend should track pending whiteboard jobs");
   assert.match(appJs, /\/board\/jobs\?client_session_id=/, "frontend should poll the board jobs endpoint");
   assert.match(appJs, /trackWhiteboardJob/, "frontend should track jobs returned from tool execution");
+  assert.match(appJs, /workspaceSyncJobs/, "frontend should track workspace-backed sync jobs separately");
 });
 
 test("frontend includes a committed workspace ledger and reasoning undo", () => {
@@ -57,6 +58,14 @@ test("frontend labels tentative and committed board nodes", () => {
   assert.match(appJs, /exploratory/);
   assert.match(appJs, /committed/);
   assert.match(appJs, /node\.memory_status === "committed" \? "committed" : "exploratory"/);
+});
+
+test("frontend surfaces workspace-to-board synchronization status without marking reasoning failed", () => {
+  assert.match(appJs, /setWorkspaceSyncStatus/);
+  assert.match(appJs, /Workspace updated; synchronizing board\.\.\./);
+  assert.match(appJs, /Workspace is current; visual board update failed\./);
+  assert.match(appJs, /job\.workspace_sync/);
+  assert.doesNotMatch(appJs, /Workspace failed/);
 });
 
 test("frontend offsets board content away from the workspace ledger", () => {

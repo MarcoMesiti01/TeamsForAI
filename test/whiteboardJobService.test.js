@@ -3,6 +3,11 @@ const assert = require("node:assert/strict");
 
 const { createBoardState, applyBoardOperations, getBoardSnapshot } = require("../lib/boardState");
 const {
+  createReasoningWorkspace,
+  applyWorkspaceOperations,
+  undoLastWorkspaceCheckpoint,
+} = require("../lib/reasoningWorkspace");
+const {
   createWhiteboardJob,
   runWhiteboardJob,
   listWhiteboardJobs,
@@ -160,6 +165,81 @@ test("listed whiteboard jobs isolate serialized state from caller mutations", as
   assert.equal(job.board_operations.length, 1);
   assert.equal(job.board_state.nodes[0].text, "Use canary rollout");
   assert.notDeepEqual(job.target_resolution, { targets: ["mutated"] });
+});
+
+test("stale workspace sync job cannot apply after a newer reasoning undo sync", async () => {
+  const workspace = createReasoningWorkspace();
+  applyWorkspaceOperations(workspace, [{
+    type: "add_entry",
+    id: "option-old",
+    category: "options",
+    content: "Use old rollout",
+    origin: "user_stated",
+    source_turn_id: "turn-old",
+  }], { source: "test", turn_id: "turn-old" });
+  const state = { board: createBoardState(), workspace, whiteboard_jobs: [] };
+  let releaseOldPlanner;
+  const oldPlannerStarted = new Promise((resolve) => {
+    releaseOldPlanner = resolve;
+  });
+  const oldJob = createWhiteboardJob(state, {
+    command_type: "reorganize_artifact",
+    artifact_type: "idea_map",
+    user_goal: "Project old workspace",
+    workspace_context: { active_entries: { options: [{ id: "option-old" }] } },
+    sync_reason: "committed_workspace_change",
+    expected_workspace_version: workspace.version,
+  }, { autoStart: false });
+
+  const oldRun = runWhiteboardJob(state, oldJob.job_id, {
+    plannerOptions: {
+      plannerProvider: async () => {
+        await oldPlannerStarted;
+        return {
+          spoken_summary: "Old sync",
+          reasoning_summary: "Stale workspace projection.",
+          layout_notes: "",
+          missing_info: [],
+          board_operations: [
+            { type: "create_node", id: "node-old", text: "old-after-undo", x: 120, y: 90 },
+          ],
+        };
+      },
+    },
+  });
+
+  undoLastWorkspaceCheckpoint(workspace);
+  const undoJob = createWhiteboardJob(state, {
+    command_type: "reorganize_artifact",
+    artifact_type: "idea_map",
+    user_goal: "Project undo workspace",
+    workspace_context: { active_entries: { options: [] } },
+    sync_reason: "reasoning_undo",
+    expected_workspace_version: workspace.version,
+  }, { autoStart: false });
+
+  await runWhiteboardJob(state, undoJob.job_id, {
+    plannerOptions: {
+      plannerProvider: async () => ({
+        spoken_summary: "Undo sync",
+        reasoning_summary: "Current workspace projection.",
+        layout_notes: "",
+        missing_info: [],
+        board_operations: [
+          { type: "create_node", id: "node-undo", text: "undo-first", x: 120, y: 90 },
+        ],
+      }),
+    },
+  });
+  releaseOldPlanner();
+  await oldRun;
+
+  assert.equal(undoJob.status, "completed");
+  assert.equal(undoJob.sync_status, "synchronized");
+  assert.equal(oldJob.status, "failed");
+  assert.equal(oldJob.sync_status, "failed");
+  assert.match(oldJob.error, /stale workspace board sync/i);
+  assert.deepEqual(state.board.nodes.map((node) => node.text), ["undo-first"]);
 });
 
 test("needs-clarification job leaves synchronization pending and board unchanged", async () => {

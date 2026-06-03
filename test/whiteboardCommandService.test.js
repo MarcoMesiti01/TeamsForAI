@@ -34,6 +34,7 @@ test("normalizes valid whiteboard command JSON", () => {
   assert.equal(command.allow_destructive, false);
   assert.deepEqual(command.workspace_context, workspaceContext);
   assert.equal(command.sync_reason, "reasoning_turn");
+  assert.equal(command.expected_workspace_version, null);
 });
 
 test("normalizing a command isolates workspace metadata from caller mutations", () => {
@@ -102,6 +103,17 @@ test("defaults sync reason to workspace update only when workspace context is pr
   });
 
   assert.equal(command.sync_reason, "workspace_update");
+});
+
+test("retains expected workspace version for workspace-backed board sync", () => {
+  const command = normalizeWhiteboardCommand({
+    command_type: "reorganize_artifact",
+    user_goal: "Synchronize workspace",
+    workspace_context: { active_entries: {} },
+    expected_workspace_version: 7,
+  });
+
+  assert.equal(command.expected_workspace_version, 7);
 });
 
 test("rejects unsupported whiteboard command types", () => {

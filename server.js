@@ -322,7 +322,10 @@ app.post("/tools/execute", async (req, res) => {
       const result = await coordinateReasoningTurn(toolArgs, state, reasoningCoordinatorOptions);
       let whiteboardJob = null;
       if (result.board_command) {
-        const job = createWhiteboardJob(state, result.board_command);
+        const job = createWhiteboardJob(state, {
+          ...result.board_command,
+          expected_workspace_version: state.workspace.version,
+        });
         whiteboardJob = {
           job_id: job.job_id,
           status: job.status,
@@ -458,6 +461,7 @@ app.post("/workspace/undo", (req, res) => {
       target_confidence: 1,
       workspace_context: buildCompactWorkspaceContext(state.workspace),
       sync_reason: "reasoning_undo",
+      expected_workspace_version: state.workspace.version,
     });
     whiteboardJob = {
       job_id: job.job_id,

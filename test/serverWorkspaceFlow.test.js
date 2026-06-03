@@ -146,6 +146,7 @@ test("coordinate_reasoning_turn commits workspace entries and queues board sync"
     const jobs = await getJson(`${baseUrl}/board/jobs?client_session_id=commit-session`);
     assert.equal(jobs.jobs.length, 1);
     assert.equal(jobs.jobs[0].command.sync_reason, "committed_workspace_change");
+    assert.equal(jobs.jobs[0].command.expected_workspace_version, result.workspace_state.version);
     assert.equal(jobs.jobs[0].command.workspace_context.active_entries.objectives[0].id, "objective-reliability");
   });
 });
@@ -225,6 +226,7 @@ test("workspace undo reverses committed memory and queues board sync only on suc
     const jobs = await getJson(`${baseUrl}/board/jobs?client_session_id=undo-session`);
     assert.equal(jobs.jobs.length, 2);
     assert.equal(jobs.jobs[1].command.sync_reason, "reasoning_undo");
+    assert.equal(jobs.jobs[1].command.expected_workspace_version, undo.workspace_state.version);
 
     const secondUndo = await postJson(baseUrl, "/workspace/undo", {
       client_session_id: "undo-session",

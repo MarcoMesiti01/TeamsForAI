@@ -64,6 +64,11 @@ function appendDebug(text) {
 function setWorkspaceSyncStatus(job) {
   if (!job || !workspaceSyncJobs.has(job.job_id)) return;
 
+  if (job.status === "needs_clarification") {
+    workspaceStatusEl.textContent = "Workspace is current; visual board update needs clarification.";
+    return;
+  }
+
   if (job.sync_status === "pending") {
     workspaceStatusEl.textContent = "Workspace updated; synchronizing board...";
     return;
@@ -126,6 +131,7 @@ async function pollWhiteboardJobs() {
       if (job.status === "failed" || job.status === "needs_clarification") {
         pendingWhiteboardJobs.delete(job.job_id);
         setWorkspaceSyncStatus(job);
+        workspaceSyncJobs.delete(job.job_id);
         appendLine("system", job.error || job.spoken_summary || "Board update needs clarification.");
       }
     });

@@ -14,9 +14,9 @@ Localhost web app that connects to the OpenAI Realtime API with voice input/outp
   - Optional model field that overrides only the realtime controller model
 - **Voice controller + router + brain split**
   - Realtime model acts as low-latency voice controller
-  - Single high-level tool: `route_user_intent`
-  - Backend router converts spoken goals into structured JSON intent
-  - Backend Brain handles deeper reasoning and produces board operations
+  - Main reasoning tool: `coordinate_reasoning_turn`
+  - Backend coordinator updates shared reasoning memory before deeper analysis
+  - Backend router and Brain still handle visual routing, deeper reasoning, and board operations
 - **Milestone 1 board protocol**
   - Supports typed operations: `create_node`, `update_node`, `create_edge`, `create_group`, `move_item`, `emphasize_item`, `delete_item`, and `undo`
   - Stores board changes in an append-only operation log
@@ -110,11 +110,11 @@ Try saying:
 
 Expected behavior:
 
-1. Realtime controller calls `route_user_intent`
-2. Router returns structured intent for an `idea_map`
-3. Brain creates typed board operations
-4. Server applies the operations to session board state
-5. UI renders the DOM/SVG whiteboard and enables Undo
+1. Realtime controller calls `coordinate_reasoning_turn`
+2. Coordinator updates working memory or committed reasoning entries
+3. Router and Brain decide whether the board needs an `idea_map`
+4. Server queues typed board operations and returns the current workspace state
+5. UI renders the reasoning ledger plus the DOM/SVG whiteboard and enables the relevant Undo controls
 6. Realtime controller speaks the concise `spoken_summary`
 
 You can drag any generated card. On drop, the browser sends a `move_item` operation to the server, receives updated board state, and keeps the move undoable.

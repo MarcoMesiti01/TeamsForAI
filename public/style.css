@@ -37,7 +37,7 @@ body {
 .board-header {
   position: fixed;
   top: 22px;
-  left: 24px;
+  left: 344px;
   z-index: 10;
   pointer-events: none;
 }
@@ -60,7 +60,7 @@ body {
 
 #boardStatus {
   position: fixed;
-  left: 24px;
+  left: 344px;
   bottom: 22px;
   z-index: 10;
   margin: 0;
@@ -77,8 +77,9 @@ body {
   position: relative;
   min-width: 1200px;
   min-height: 900px;
-  width: 100%;
+  width: calc(100% - 320px);
   height: 100%;
+  margin-left: 320px;
   overflow: hidden;
   background:
     linear-gradient(rgba(25, 37, 54, 0.06) 1px, transparent 1px),
@@ -167,6 +168,14 @@ body {
   user-select: none;
 }
 
+.board-node.exploratory {
+  border-style: dashed;
+}
+
+.board-node.committed {
+  border-style: solid;
+}
+
 .board-node.primary {
   border-color: #2563eb;
   background: #eff6ff;
@@ -193,7 +202,7 @@ body {
 
 .transcript-panel {
   position: fixed;
-  left: 24px;
+  left: 344px;
   bottom: 66px;
   z-index: 20;
   width: min(360px, calc(100vw - 380px));
@@ -205,6 +214,98 @@ body {
   color: #e5eefc;
   backdrop-filter: blur(12px);
   box-shadow: 0 18px 50px rgba(15, 23, 42, 0.22);
+}
+
+.workspace-ledger {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  bottom: 18px;
+  z-index: 30;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem;
+  border: 1px solid rgba(95, 111, 132, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #172033;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 20px 55px rgba(29, 41, 57, 0.16);
+}
+
+.workspace-ledger-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.workspace-ledger-header .status {
+  margin: 0.35rem 0 0;
+  font-size: 0.82rem;
+}
+
+.workspace-ledger-content {
+  flex: 1;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 0.8rem;
+  padding-right: 0.15rem;
+}
+
+.ledger-empty {
+  margin: 0;
+  color: #5f6f84;
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.ledger-section {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.ledger-section h3 {
+  margin: 0;
+  color: #334155;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ledger-entry {
+  padding: 0.65rem 0.7rem;
+  border: 1px solid rgba(95, 111, 132, 0.2);
+  border-left: 4px solid #64748b;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 20px rgba(29, 41, 57, 0.08);
+}
+
+.ledger-entry.ai_inferred {
+  border-left-color: #7c3aed;
+  background: #f5f3ff;
+}
+
+.ledger-entry.user_stated {
+  border-left-color: #0f766e;
+  background: #f0fdfa;
+}
+
+.ledger-entry p {
+  margin: 0;
+  color: #172033;
+  font-size: 0.9rem;
+  line-height: 1.35;
+}
+
+.ledger-provenance {
+  display: inline-block;
+  margin-top: 0.45rem;
+  color: #5f6f84;
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 .transcript-panel h2 {
@@ -336,11 +437,26 @@ button[disabled] {
 }
 
 @media (max-width: 760px) {
+  body {
+    overflow: auto;
+  }
+
+  .app-shell {
+    min-height: 100vh;
+    height: auto;
+    padding: 12px;
+    display: grid;
+    gap: 12px;
+  }
+
+  .workspace-ledger,
   .command-pane {
-    top: 12px;
-    right: 12px;
-    left: 12px;
+    position: static;
     width: auto;
+  }
+
+  .workspace-ledger {
+    max-height: 280px;
   }
 
   .command-stack {
@@ -348,9 +464,7 @@ button[disabled] {
   }
 
   .transcript-panel {
-    left: 12px;
-    right: 12px;
-    bottom: 12px;
+    position: static;
     width: auto;
     max-height: 170px;
   }
@@ -360,11 +474,30 @@ button[disabled] {
   }
 
   .board-header {
-    top: 184px;
-    left: 14px;
+    position: static;
+    padding: 0.85rem;
+    pointer-events: auto;
   }
 
   #boardStatus {
-    display: none;
+    position: static;
+    display: inline-block;
+    margin: 0 0 0.5rem 0.85rem;
+  }
+
+  .board-panel {
+    position: relative;
+    min-height: 520px;
+    border-radius: 8px;
+    overflow: auto;
+  }
+
+  .board {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .board-empty {
+    left: 14px;
   }
 }

@@ -30,6 +30,13 @@ test("frontend renders command pane with model and settings selectors", () => {
   });
 });
 
+test("frontend realtime model selector avoids stale preview models", () => {
+  assert.match(html, /<option value="gpt-realtime">gpt-realtime<\/option>/);
+  assert.match(html, /<option value="gpt-realtime-1\.5">gpt-realtime-1\.5<\/option>/);
+  assert.match(html, /<option value="gpt-realtime-mini">gpt-realtime-mini<\/option>/);
+  assert.doesNotMatch(html, /gpt-4o-realtime-preview/);
+});
+
 test("frontend polls asynchronous whiteboard jobs", () => {
   assert.match(appJs, /pendingWhiteboardJobs/, "frontend should track pending whiteboard jobs");
   assert.match(appJs, /\/board\/jobs\?client_session_id=/, "frontend should poll the board jobs endpoint");
@@ -125,4 +132,13 @@ test("frontend parses session failures before displaying and logging them", () =
   assert.match(appJs, /await readSessionError\(sdpResp\)/);
   assert.match(appJs, /contentType\.includes\("json"\)/);
   assert.doesNotMatch(appJs, /SDP exchange failed: \$\{text\}/);
+});
+
+test("frontend can fall back to direct Realtime WebRTC with an ephemeral token", () => {
+  assert.match(appJs, /async function fetchEphemeralRealtimeToken/);
+  assert.match(appJs, /async function createDirectRealtimeCall/);
+  assert.match(appJs, /\/token\?/);
+  assert.match(appJs, /https:\/\/api\.openai\.com\/v1\/realtime\/calls/);
+  assert.match(appJs, /Authorization: `Bearer \$\{EPHEMERAL_KEY\}`/);
+  assert.match(appJs, /if \(sdpResp\.status >= 500\)[\s\S]*createDirectRealtimeCall/);
 });

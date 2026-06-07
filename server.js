@@ -94,6 +94,34 @@ function summarizeRealtimeCallFailure(response, responseText) {
   return `OpenAI Realtime service returned ${statusText}.`;
 }
 
+function selectRealtimeSessionOptions(query = {}) {
+  const frontendModelOverride = String(query?.model || "").trim();
+  const requestedVoice = String(query?.voice || "").trim();
+  const selectedVoice = REALTIME_VOICES.has(requestedVoice) ? requestedVoice : "alloy";
+  const selectedModel = frontendModelOverride || selectModel({
+    role: MODEL_ROLES.realtime_controller,
+    complexity: "low",
+    latency_budget: "realtime",
+    artifact_type: "conversation",
+  }).model;
+
+  return {
+    selectedModel,
+    selectedVoice,
+    overridden: Boolean(frontendModelOverride),
+  };
+}
+
+function buildRealtimeSessionConfig({ selectedModel, selectedVoice }) {
+  return {
+    type: "realtime",
+    model: selectedModel,
+    audio: { output: { voice: selectedVoice } },
+    tools: TOOL_DEFINITIONS,
+    instructions: TOOLING_INSTRUCTIONS,
+  };
+}
+
 app.use(express.text({ type: ["application/sdp", "text/plain"] }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
@@ -368,15 +396,7 @@ app.post("/session", async (req, res) => {
       });
     }
 
-    const frontendModelOverride = String(req.query?.model || "").trim();
-    const requestedVoice = String(req.query?.voice || "").trim();
-    const selectedVoice = REALTIME_VOICES.has(requestedVoice) ? requestedVoice : "alloy";
-    const selectedModel = frontendModelOverride || selectModel({
-      role: MODEL_ROLES.realtime_controller,
-      complexity: "low",
-      latency_budget: "realtime",
-      artifact_type: "conversation",
-    }).model;
+    const { selectedModel, selectedVoice, overridden } = selectRealtimeSessionOptions(req.query);
 
     logRouteEvent({
       traceId,
@@ -387,17 +407,11 @@ app.post("/session", async (req, res) => {
       payload: {
         model: selectedModel,
         voice: selectedVoice,
-        overridden: Boolean(frontendModelOverride),
+        overridden,
       },
     });
 
-    const sessionConfig = JSON.stringify({
-      type: "realtime",
-      model: selectedModel,
-      audio: { output: { voice: selectedVoice } },
-      tools: TOOL_DEFINITIONS,
-      instructions: TOOLING_INSTRUCTIONS,
-    });
+    const sessionConfig = JSON.stringify(buildRealtimeSessionConfig({ selectedModel, selectedVoice }));
     const formData = new FormData();
     formData.set("sdp", sdpOffer);
     formData.set("session", sessionConfig);
@@ -467,6 +481,135 @@ app.post("/session", async (req, res) => {
     });
     return res.status(500).json({
       error: "Unexpected server error while creating realtime call.",
+      details: error.message,
+    });
+  }
+});
+
+app.get("/token", async (req, res) => {
+  const startedAt = nowMs();
+  const traceId = makeTraceId("token");
+  const clientSessionId = getSessionId(req.query?.client_session_id);
+
+  try {
+    logRouteEvent({
+      sessionId: clientSessionId,
+      traceId,
+      category: "session",
+      action: "create_client_secret",
+      status: "started",
+      summary: "Realtime client-secret request started.",
+      payload: {
+        model_override: String(req.query?.model || "").trim() || null,
+        voice: String(req.query?.voice || "").trim() || null,
+      },
+    });
+
+    if (!OPENAI_API_KEY) {
+      logRouteEvent({
+        sessionId: clientSessionId,
+        traceId,
+        category: "session",
+        action: "create_client_secret",
+        status: "failed",
+        summary: "Missing OPENAI_API_KEY in environment.",
+        payload: {
+          duration_ms: durationMs(startedAt),
+        },
+      });
+      return res.status(500).json({
+        error: "Missing OPENAI_API_KEY in environment.",
+      });
+    }
+
+    const { selectedModel, selectedVoice, overridden } = selectRealtimeSessionOptions(req.query);
+    const response = await fetch("https://api.openai.com/v1/realtime/client_secrets", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+        "OpenAI-Safety-Identifier": clientSessionId,
+      },
+      body: JSON.stringify({
+        expires_after: {
+          anchor: "created_at",
+          seconds: 600,
+        },
+        session: buildRealtimeSessionConfig({ selectedModel, selectedVoice }),
+      }),
+    });
+    const responseText = await response.text();
+
+    if (!response.ok) {
+      logRouteEvent({
+        sessionId: clientSessionId,
+        traceId,
+        category: "session",
+        action: "create_client_secret",
+        status: "failed",
+        summary: "Failed to create Realtime client secret.",
+        payload: {
+          status: response.status,
+          model: selectedModel,
+          voice: selectedVoice,
+          duration_ms: durationMs(startedAt),
+        },
+      });
+      return res.status(response.status).json({
+        error: "Failed to create Realtime client secret.",
+        details: summarizeRealtimeCallFailure(response, responseText),
+      });
+    }
+
+    const responseJson = tryParseJson(responseText);
+    if (!responseJson) {
+      logRouteEvent({
+        sessionId: clientSessionId,
+        traceId,
+        category: "session",
+        action: "create_client_secret",
+        status: "failed",
+        summary: "Realtime client-secret response was not JSON.",
+        payload: {
+          status: response.status,
+          duration_ms: durationMs(startedAt),
+        },
+      });
+      return res.status(502).json({
+        error: "Realtime client-secret response was not JSON.",
+      });
+    }
+
+    logRouteEvent({
+      sessionId: clientSessionId,
+      traceId,
+      category: "session",
+      action: "create_client_secret",
+      status: "completed",
+      summary: "Realtime client secret created.",
+      payload: {
+        model: selectedModel,
+        voice: selectedVoice,
+        overridden,
+        duration_ms: durationMs(startedAt),
+      },
+    });
+    return res.json(responseJson);
+  } catch (error) {
+    logRouteEvent({
+      sessionId: clientSessionId,
+      traceId,
+      category: "session",
+      action: "create_client_secret",
+      status: "failed",
+      summary: "Unexpected server error while creating Realtime client secret.",
+      payload: {
+        error: error.message,
+        duration_ms: durationMs(startedAt),
+      },
+    });
+    return res.status(500).json({
+      error: "Unexpected server error while creating Realtime client secret.",
       details: error.message,
     });
   }

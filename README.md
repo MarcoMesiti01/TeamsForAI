@@ -6,7 +6,7 @@ Localhost web app that connects to the OpenAI Realtime API with voice input/outp
 
 - **Express backend** with a secure `/session` endpoint
   - Uses your server-side `OPENAI_API_KEY`
-  - Returns a short-lived ephemeral key to the browser
+  - Proxies the first WebRTC SDP exchange and can mint a short-lived ephemeral key for direct browser fallback
 - **Plain HTML/CSS/JS frontend**
   - Connect/disconnect to Realtime
   - Microphone mute/unmute
@@ -50,7 +50,7 @@ copy .env.example .env
 
 ```env
 OPENAI_API_KEY=your_real_key_here
-DEFAULT_REALTIME_MODEL=gpt-4o-realtime-preview
+DEFAULT_REALTIME_MODEL=gpt-realtime
 ORCHESTRATOR_MODEL=gpt-4.1-mini
 BRAIN_MODEL=gpt-4.1-mini
 WHITEBOARD_MODEL=gpt-4.1-mini

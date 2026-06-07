@@ -92,6 +92,67 @@ async function readSessionError(response) {
   return compactText.length > 180 ? `${compactText.slice(0, 177)}...` : compactText;
 }
 
+function buildRealtimeParams(modelOverride, voice) {
+  const params = new URLSearchParams();
+  params.set("client_session_id", clientSessionId);
+  if (modelOverride) params.set("model", modelOverride);
+  if (voice) params.set("voice", voice);
+  return params;
+}
+
+async function fetchEphemeralRealtimeToken(modelOverride, voice) {
+  const params = buildRealtimeParams(modelOverride, voice);
+  const tokenResponse = await fetch(`/token?${params.toString()}`);
+  if (!tokenResponse.ok) {
+    throw new Error(await readSessionError(tokenResponse));
+  }
+
+  const data = await tokenResponse.json();
+  const EPHEMERAL_KEY = data.value || data.client_secret?.value;
+  if (!EPHEMERAL_KEY) {
+    throw new Error("Realtime token response did not include an ephemeral key.");
+  }
+  return { EPHEMERAL_KEY, data };
+}
+
+async function createDirectRealtimeCall(localSdp, modelOverride, voice) {
+  const { EPHEMERAL_KEY, data } = await fetchEphemeralRealtimeToken(modelOverride, voice);
+  void recordClientEvent("direct_realtime_connect", "started", "Direct Realtime SDP exchange started", {
+    model: modelOverride,
+    voice,
+  });
+
+  const sdpResponse = await fetch("https://api.openai.com/v1/realtime/calls", {
+    method: "POST",
+    body: localSdp,
+    headers: {
+      Authorization: `Bearer ${EPHEMERAL_KEY}`,
+      "Content-Type": "application/sdp",
+    },
+  });
+
+  if (!sdpResponse.ok) {
+    const error = await readSessionError(sdpResponse);
+    void recordClientEvent("direct_realtime_connect", "failed", "Direct Realtime SDP exchange failed", {
+      error,
+      model: modelOverride,
+      voice,
+    });
+    throw new Error(error);
+  }
+
+  void recordClientEvent("direct_realtime_connect", "completed", "Direct Realtime SDP exchange completed", {
+    model: data.session?.model || modelOverride,
+    voice,
+  });
+  return {
+    answerSdp: await sdpResponse.text(),
+    model: data.session?.model || modelOverride || "backend default",
+    voice: data.session?.audio?.output?.voice || voice,
+    mode: "direct",
+  };
+}
+
 function summarizeEvent(event) {
   const status = event.status ? `${event.status}: ` : "";
   return `${status}${event.summary || `${event.category || "event"} ${event.action || ""}`.trim()}`;
@@ -923,9 +984,7 @@ async function connect() {
     }
     appendDebug(`local SDP length=${localSdp.length}`);
 
-    const params = new URLSearchParams();
-    if (modelOverride) params.set("model", modelOverride);
-    if (voice) params.set("voice", voice);
+    const params = buildRealtimeParams(modelOverride, voice);
 
     const sdpResp = await fetch(`/session?${params.toString()}`, {
       method: "POST",
@@ -935,18 +994,33 @@ async function connect() {
       body: localSdp,
     });
 
+    let answerSdp;
+    let connectedModel = sdpResp.headers.get("X-Realtime-Model") || modelOverride || "backend default";
+    let connectedVoice = sdpResp.headers.get("X-Realtime-Voice") || voice;
+    let connectionMode = "server";
     if (!sdpResp.ok) {
-      throw new Error(await readSessionError(sdpResp));
+      const serverError = await readSessionError(sdpResp);
+      if (sdpResp.status >= 500) {
+        appendDebug("server SDP exchange failed; trying direct Realtime fallback");
+        const directCall = await createDirectRealtimeCall(localSdp, modelOverride, voice);
+        answerSdp = directCall.answerSdp;
+        connectedModel = directCall.model;
+        connectedVoice = directCall.voice;
+        connectionMode = directCall.mode;
+      } else {
+        throw new Error(serverError);
+      }
+    } else {
+      answerSdp = await sdpResp.text();
     }
 
-    const answerSdp = await sdpResp.text();
     await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
 
     disconnectBtn.disabled = false;
     micBtn.disabled = false;
     micEnabled = true;
     micBtn.textContent = "Mute Mic";
-    appendLine("system", `Connected using model: ${sdpResp.headers.get("X-Realtime-Model") || modelOverride || "backend default"} and voice: ${sdpResp.headers.get("X-Realtime-Voice") || voice}`);
+    appendLine("system", `Connected using model: ${connectedModel} and voice: ${connectedVoice} (${connectionMode})`);
     startSessionLogRefresh();
     void loadSessionLog();
   } catch (err) {

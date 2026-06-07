@@ -1,3 +1,5 @@
+require("./eventRecorder.test");
+require("./logRoutes.test");
 require("./modelPolicy.test");
 require("./intentRouter.test");
 require("./boardState.test");

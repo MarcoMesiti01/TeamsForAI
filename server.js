@@ -1,6 +1,7 @@
 const path = require("path");
 const express = require("express");
 require("dotenv").config({ path: path.join(__dirname, ".env"), override: true });
+const { defaultEventRecorder } = require("./lib/eventRecorder");
 const { delegateToBrain } = require("./lib/brainService");
 const { routeUserIntent } = require("./lib/intentRouter");
 const { createBoardState, applyBoardOperations, getBoardSnapshot, undoLastCheckpoint } = require("./lib/boardState");
@@ -13,6 +14,38 @@ const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const sessionStateStore = new Map();
 const REALTIME_VOICES = new Set(["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]);
+
+function nowMs() {
+  return Date.now();
+}
+
+function durationMs(startedAt) {
+  return Number.isFinite(startedAt) ? Math.max(0, nowMs() - startedAt) : null;
+}
+
+function recordEvent(event) {
+  return defaultEventRecorder.recordEvent(event);
+}
+
+function makeTraceId(prefix = "trace") {
+  return defaultEventRecorder.makeTraceId(prefix);
+}
+
+function getSessionId(value) {
+  return String(value || "default");
+}
+
+function logRouteEvent({ sessionId, traceId, category, action, status, summary, payload }) {
+  return recordEvent({
+    session_id: getSessionId(sessionId),
+    trace_id: traceId || makeTraceId(category || "trace"),
+    category,
+    action,
+    status,
+    summary,
+    payload,
+  });
+}
 
 app.use(express.text({ type: ["application/sdp", "text/plain"] }));
 app.use(express.json());
@@ -141,8 +174,32 @@ function getSessionState(clientSessionId) {
 }
 
 app.post("/session", async (req, res) => {
+  const startedAt = nowMs();
+  const traceId = makeTraceId("session");
   try {
+    logRouteEvent({
+      traceId,
+      category: "session",
+      action: "create",
+      status: "started",
+      summary: "Realtime session request started.",
+      payload: {
+        model_override: String(req.query?.model || "").trim() || null,
+        voice: String(req.query?.voice || "").trim() || null,
+      },
+    });
+
     if (!OPENAI_API_KEY) {
+      logRouteEvent({
+        traceId,
+        category: "session",
+        action: "create",
+        status: "failed",
+        summary: "Missing OPENAI_API_KEY in environment.",
+        payload: {
+          duration_ms: durationMs(startedAt),
+        },
+      });
       return res.status(500).json({
         error: "Missing OPENAI_API_KEY in environment.",
       });
@@ -151,6 +208,19 @@ app.post("/session", async (req, res) => {
     const sdpOffer = typeof req.body === "string" ? req.body : "";
     const sdpPreview = sdpOffer.split(/\r?\n/, 1)[0] || "";
     if (!sdpOffer.trim()) {
+      logRouteEvent({
+        traceId,
+        category: "session",
+        action: "validate_sdp",
+        status: "failed",
+        summary: "Missing WebRTC SDP offer.",
+        payload: {
+          content_type: req.get("content-type") || "",
+          content_length: req.get("content-length") || "",
+          body_type: typeof req.body,
+          duration_ms: durationMs(startedAt),
+        },
+      });
       return res.status(400).json({
         error: "Missing WebRTC SDP offer.",
         debug: {
@@ -162,6 +232,20 @@ app.post("/session", async (req, res) => {
     }
 
     if (!sdpOffer.startsWith("v=0")) {
+      logRouteEvent({
+        traceId,
+        category: "session",
+        action: "validate_sdp",
+        status: "failed",
+        summary: "Invalid WebRTC SDP offer.",
+        payload: {
+          sdp_length: sdpOffer.length,
+          sdp_first_line: sdpPreview,
+          content_type: req.get("content-type") || "",
+          content_length: req.get("content-length") || "",
+          duration_ms: durationMs(startedAt),
+        },
+      });
       return res.status(400).json({
         error: "Invalid WebRTC SDP offer: expected the body to start with v=0.",
         debug: {
@@ -182,6 +266,19 @@ app.post("/session", async (req, res) => {
       latency_budget: "realtime",
       artifact_type: "conversation",
     }).model;
+
+    logRouteEvent({
+      traceId,
+      category: "session",
+      action: "select_model",
+      status: "info",
+      summary: "Selected realtime model and voice.",
+      payload: {
+        model: selectedModel,
+        voice: selectedVoice,
+        overridden: Boolean(frontendModelOverride),
+      },
+    });
 
     const sessionConfig = JSON.stringify({
       type: "realtime",
@@ -205,6 +302,17 @@ app.post("/session", async (req, res) => {
     const responseText = await response.text();
 
     if (!response.ok) {
+      logRouteEvent({
+        traceId,
+        category: "session",
+        action: "create_realtime_call",
+        status: "failed",
+        summary: "Failed to create realtime call.",
+        payload: {
+          status: response.status,
+          duration_ms: durationMs(startedAt),
+        },
+      });
       return res.status(response.status).json({
         error: "Failed to create realtime call.",
         details: responseText,
@@ -217,11 +325,35 @@ app.post("/session", async (req, res) => {
       });
     }
 
+    logRouteEvent({
+      traceId,
+      category: "session",
+      action: "create_realtime_call",
+      status: "completed",
+      summary: "Realtime session created.",
+      payload: {
+        model: selectedModel,
+        voice: selectedVoice,
+        duration_ms: durationMs(startedAt),
+      },
+    });
+
     res.setHeader("Content-Type", "application/sdp");
     res.setHeader("X-Realtime-Model", selectedModel);
     res.setHeader("X-Realtime-Voice", selectedVoice);
     return res.send(responseText);
   } catch (error) {
+    logRouteEvent({
+      traceId,
+      category: "session",
+      action: "create_realtime_call",
+      status: "failed",
+      summary: "Unexpected server error while creating realtime call.",
+      payload: {
+        error: error.message,
+        duration_ms: durationMs(startedAt),
+      },
+    });
     return res.status(500).json({
       error: "Unexpected server error while creating realtime call.",
       details: error.message,
@@ -230,12 +362,38 @@ app.post("/session", async (req, res) => {
 });
 
 app.post("/tools/execute", async (req, res) => {
+  const startedAt = nowMs();
+  const traceId = makeTraceId("tool");
   try {
     const toolName = req.body?.name;
     const toolArgs = req.body?.arguments || {};
     const clientSessionId = req.body?.client_session_id || "default";
 
+    logRouteEvent({
+      sessionId: clientSessionId,
+      traceId,
+      category: "tool",
+      action: "execute",
+      status: "started",
+      summary: "Tool execution started.",
+      payload: {
+        tool_name: toolName || null,
+        duration_ms: durationMs(startedAt),
+      },
+    });
+
     if (!toolName) {
+      logRouteEvent({
+        sessionId: clientSessionId,
+        traceId,
+        category: "tool",
+        action: "execute",
+        status: "failed",
+        summary: "Missing tool name.",
+        payload: {
+          duration_ms: durationMs(startedAt),
+        },
+      });
       return res.status(400).json({ ok: false, error: "Missing tool name." });
     }
 
@@ -250,12 +408,19 @@ app.post("/tools/execute", async (req, res) => {
             board: state.board,
             selected_item: state.selected_item,
             recently_moved_item: state.recently_moved_item,
+            recorder: defaultEventRecorder,
+            session_id: clientSessionId,
+            trace_id: traceId,
           });
       if (toolName !== "delegate_to_brain" && intent.should_use_whiteboard === true) {
         const command = intent.board_command || buildWhiteboardCommandFromIntent(intent);
-        const job = createWhiteboardJob(state, command);
+        const job = createWhiteboardJob(state, command, {
+          recorder: defaultEventRecorder,
+          session_id: clientSessionId,
+          trace_id: traceId,
+        });
         sessionStateStore.set(clientSessionId, state);
-        return res.json({
+        const responseBody = {
           handled_by: "whiteboard_job",
           spoken_summary: job.spoken_ack,
           full_response: "Whiteboard update queued.",
@@ -270,15 +435,47 @@ app.post("/tools/execute", async (req, res) => {
             spoken_ack: job.spoken_ack,
           },
           board_state: getBoardSnapshot(state.board),
+        };
+        logRouteEvent({
+          sessionId: clientSessionId,
+          traceId,
+          category: "tool",
+          action: "execute",
+          status: "completed",
+          summary: "Tool execution completed.",
+          payload: {
+            tool_name: toolName,
+            response: responseBody,
+            duration_ms: durationMs(startedAt),
+          },
         });
+        return res.json(responseBody);
       }
-      const result = await delegateToBrain(intent, state);
+      const result = await delegateToBrain(intent, state, {
+        recorder: defaultEventRecorder,
+        session_id: clientSessionId,
+        trace_id: traceId,
+      });
       sessionStateStore.set(clientSessionId, state);
-      return res.json({
+      const responseBody = {
         ...result,
         intent,
         board_state: result.board_state || getBoardSnapshot(state.board),
+      };
+      logRouteEvent({
+        sessionId: clientSessionId,
+        traceId,
+        category: "tool",
+        action: "execute",
+        status: "completed",
+        summary: "Tool execution completed.",
+        payload: {
+          tool_name: toolName,
+          response: responseBody,
+          duration_ms: durationMs(startedAt),
+        },
       });
+      return res.json(responseBody);
     }
 
     if (toolName === "submit_whiteboard_command") {
@@ -286,9 +483,13 @@ app.post("/tools/execute", async (req, res) => {
       const job = createWhiteboardJob(state, {
         ...toolArgs,
         user_goal: toolArgs.user_goal || toolArgs.change_description || "Update the whiteboard",
+      }, {
+        recorder: defaultEventRecorder,
+        session_id: clientSessionId,
+        trace_id: traceId,
       });
       sessionStateStore.set(clientSessionId, state);
-      return res.json({
+      const responseBody = {
         handled_by: "whiteboard_job",
         spoken_summary: job.spoken_ack,
         full_response: "Whiteboard update queued.",
@@ -302,13 +503,27 @@ app.post("/tools/execute", async (req, res) => {
           spoken_ack: job.spoken_ack,
         },
         board_state: getBoardSnapshot(state.board),
+      };
+      logRouteEvent({
+        sessionId: clientSessionId,
+        traceId,
+        category: "tool",
+        action: "execute",
+        status: "completed",
+        summary: "Tool execution completed.",
+        payload: {
+          tool_name: toolName,
+          response: responseBody,
+          duration_ms: durationMs(startedAt),
+        },
       });
+      return res.json(responseBody);
     }
 
     if (toolName === "undo_board_operation") {
       const state = getSessionState(clientSessionId);
       const undo = undoLastCheckpoint(state.board);
-      return res.json({
+      const responseBody = {
         handled_by: "board",
         spoken_summary: undo.ok ? "I undid the last board change." : "There is nothing to undo yet.",
         full_response: undo.ok ? "Last checkpoint restored." : undo.error,
@@ -317,17 +532,80 @@ app.post("/tools/execute", async (req, res) => {
         board_operations: [{ type: "undo" }],
         undo_checkpoint_id: null,
         ...undo,
+      };
+      logRouteEvent({
+        sessionId: clientSessionId,
+        traceId,
+        category: "tool",
+        action: "execute",
+        status: "completed",
+        summary: "Tool execution completed.",
+        payload: {
+          tool_name: toolName,
+          response: responseBody,
+          duration_ms: durationMs(startedAt),
+        },
       });
+      return res.json(responseBody);
     }
 
+    logRouteEvent({
+      sessionId: clientSessionId,
+      traceId,
+      category: "tool",
+      action: "execute",
+      status: "failed",
+      summary: `Unknown tool: ${toolName}`,
+      payload: {
+        duration_ms: durationMs(startedAt),
+      },
+    });
     return res.status(400).json({ ok: false, error: `Unknown tool: ${toolName}` });
   } catch (error) {
+    const clientSessionId = req.body?.client_session_id || "default";
+    logRouteEvent({
+      sessionId: clientSessionId,
+      traceId,
+      category: "tool",
+      action: "execute",
+      status: "failed",
+      summary: "Tool execution failed.",
+      payload: {
+        error: error.message,
+        duration_ms: durationMs(startedAt),
+      },
+    });
     return res.status(500).json({
       ok: false,
       error: "Tool execution failed.",
       details: error.message,
     });
   }
+});
+
+app.get("/logs/session", (req, res) => {
+  const clientSessionId = req.query?.client_session_id || "default";
+  return res.json({
+    ok: true,
+    events: defaultEventRecorder.getSessionEvents(clientSessionId),
+  });
+});
+
+app.post("/logs/client-event", (req, res) => {
+  const clientSessionId = req.body?.client_session_id || "default";
+  const event = recordEvent({
+    session_id: clientSessionId,
+    trace_id: req.body?.trace_id || makeTraceId("client"),
+    category: req.body?.category || "frontend",
+    action: req.body?.action || "client_event",
+    status: req.body?.status || "info",
+    summary: req.body?.summary || "Client event recorded.",
+    payload: req.body?.payload,
+  });
+  return res.status(202).json({
+    ok: true,
+    event,
+  });
 });
 
 app.get("/board/state", (req, res) => {
@@ -337,19 +615,63 @@ app.get("/board/state", (req, res) => {
 });
 
 app.post("/board/commands", (req, res) => {
+  const startedAt = nowMs();
+  const traceId = makeTraceId("board");
   try {
     const clientSessionId = req.body?.client_session_id || "default";
+    logRouteEvent({
+      sessionId: clientSessionId,
+      traceId,
+      category: "board",
+      action: "commands",
+      status: "started",
+      summary: "Board command received.",
+      payload: {
+        duration_ms: durationMs(startedAt),
+      },
+    });
     const state = getSessionState(clientSessionId);
-    const job = createWhiteboardJob(state, req.body?.command || req.body || {});
+    const job = createWhiteboardJob(state, req.body?.command || req.body || {}, {
+      recorder: defaultEventRecorder,
+      session_id: clientSessionId,
+      trace_id: traceId,
+    });
     sessionStateStore.set(clientSessionId, state);
-    return res.status(202).json({
+    const responseBody = {
       ok: true,
       job_id: job.job_id,
       status: job.status,
       spoken_ack: job.spoken_ack,
       board_state: getBoardSnapshot(state.board),
+    };
+    logRouteEvent({
+      sessionId: clientSessionId,
+      traceId,
+      category: "board",
+      action: "commands",
+      status: "completed",
+      summary: "Board command queued.",
+      payload: {
+        job_id: job.job_id,
+        status: job.status,
+        duration_ms: durationMs(startedAt),
+      },
     });
+    return res.status(202).json(responseBody);
   } catch (error) {
+    const clientSessionId = req.body?.client_session_id || "default";
+    logRouteEvent({
+      sessionId: clientSessionId,
+      traceId,
+      category: "board",
+      action: "commands",
+      status: "failed",
+      summary: "Board command failed.",
+      payload: {
+        error: error.message,
+        duration_ms: durationMs(startedAt),
+      },
+    });
     return res.status(400).json({
       ok: false,
       error: error.message,
@@ -360,18 +682,57 @@ app.post("/board/commands", (req, res) => {
 app.get("/board/jobs", (req, res) => {
   const clientSessionId = req.query?.client_session_id || "default";
   const state = getSessionState(clientSessionId);
+  const jobs = listWhiteboardJobs(state);
+  logRouteEvent({
+    sessionId: clientSessionId,
+    traceId: makeTraceId("board"),
+    category: "board",
+    action: "jobs",
+    status: "info",
+    summary: "Board jobs listed.",
+    payload: {
+      jobs_count: jobs.length,
+      board_version: state.board.version,
+    },
+  });
   return res.json({
-    jobs: listWhiteboardJobs(state),
+    jobs,
     board_state: getBoardSnapshot(state.board),
   });
 });
 
 app.post("/board/operations", (req, res) => {
+  const startedAt = nowMs();
+  const traceId = makeTraceId("board");
   try {
     const clientSessionId = req.body?.client_session_id || "default";
     const operations = req.body?.operations;
+    logRouteEvent({
+      sessionId: clientSessionId,
+      traceId,
+      category: "board",
+      action: "operations",
+      status: "started",
+      summary: "Board operations received.",
+      payload: {
+        operations,
+        duration_ms: durationMs(startedAt),
+      },
+    });
 
     if (!Array.isArray(operations) || !operations.length) {
+      logRouteEvent({
+        sessionId: clientSessionId,
+        traceId,
+        category: "board",
+        action: "operations",
+        status: "failed",
+        summary: "Board operations missing or empty.",
+        payload: {
+          operations,
+          duration_ms: durationMs(startedAt),
+        },
+      });
       return res.status(400).json({
         ok: false,
         error: "operations must be a non-empty array.",
@@ -393,8 +754,36 @@ app.post("/board/operations", (req, res) => {
       };
       state.selected_item = state.selected_item || { id: moved.id, type: "node" };
     }
+    logRouteEvent({
+      sessionId: clientSessionId,
+      traceId,
+      category: "board",
+      action: "operations",
+      status: "completed",
+      summary: "Board operations applied.",
+      payload: {
+        source: "user",
+        operations,
+        result,
+        recently_moved_item: state.recently_moved_item || null,
+        duration_ms: durationMs(startedAt),
+      },
+    });
     return res.json(result);
   } catch (error) {
+    const clientSessionId = req.body?.client_session_id || "default";
+    logRouteEvent({
+      sessionId: clientSessionId,
+      traceId,
+      category: "board",
+      action: "operations",
+      status: "failed",
+      summary: "Board operations failed.",
+      payload: {
+        error: error.message,
+        duration_ms: durationMs(startedAt),
+      },
+    });
     return res.status(400).json({
       ok: false,
       error: error.message,
@@ -403,9 +792,24 @@ app.post("/board/operations", (req, res) => {
 });
 
 app.post("/board/undo", (req, res) => {
+  const startedAt = nowMs();
+  const traceId = makeTraceId("board");
   const clientSessionId = req.body?.client_session_id || "default";
   const state = getSessionState(clientSessionId);
-  return res.json(undoLastCheckpoint(state.board));
+  const undo = undoLastCheckpoint(state.board);
+  logRouteEvent({
+    sessionId: clientSessionId,
+    traceId,
+    category: "board",
+    action: "undo",
+    status: undo.ok ? "completed" : "failed",
+    summary: undo.ok ? "Undo applied." : "Undo failed.",
+    payload: {
+      result: undo,
+      duration_ms: durationMs(startedAt),
+    },
+  });
+  return res.json(undo);
 });
 
 app.get("*", (_req, res) => {

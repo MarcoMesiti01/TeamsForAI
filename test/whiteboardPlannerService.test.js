@@ -125,3 +125,111 @@ test("fallback planner creates valid operation batches for core artifact types",
     assert.ok(plan.board_operations.some((operation) => operation.type === "create_group"), `${artifactType} should create a group`);
   }
 });
+
+test("planner emits model and validation events", async () => {
+  const events = [];
+  const recorder = {
+    recordEvent(event) {
+      events.push(event);
+    },
+  };
+  const board = createBoardState();
+
+  await planWhiteboardOperations({
+    intent_type: "develop_idea_map",
+    user_goal: "Create a process map",
+    target_artifact: "idea_map",
+  }, board, {
+    recorder,
+    sessionId: "session-456",
+    traceId: "trace-xyz",
+    plannerProvider: async () => ({
+      spoken_summary: "I added a process map.",
+      reasoning_summary: "The existing board is empty, so I created a compact starter map.",
+      layout_notes: "Nodes are spaced horizontally with a readable edge.",
+      missing_info: [],
+      board_operations: [
+        { type: "create_node", id: "node-1", text: "Start", x: 120, y: 90 },
+        { type: "create_node", id: "node-2", text: "Finish", x: 360, y: 90 },
+      ],
+    }),
+  });
+
+  assert.ok(events.some((event) => event.category === "model" && event.action === "whiteboard_planner"));
+  const validationEvent = events.find((event) => event.category === "board" && event.action === "validate_operations");
+  assert.ok(validationEvent);
+  assert.equal(validationEvent.payload.raw_operations.length, 2);
+  assert.equal(validationEvent.payload.valid_operations.length, 2);
+  assert.equal(validationEvent.payload.warnings.length, 0);
+  assert.equal(validationEvent.payload.valid_operations[0].id, "node-1");
+  assert.ok(events.every((event) => event.session_id === "session-456"));
+  assert.ok(events.every((event) => event.trace_id === "trace-xyz"));
+});
+
+test("planner emits fallback event when provider output is invalid", async () => {
+  const events = [];
+  const recorder = {
+    recordEvent(event) {
+      events.push(event);
+    },
+  };
+  const board = createBoardState();
+
+  await planWhiteboardOperations({
+    intent_type: "develop_idea_map",
+    user_goal: "Create a process map",
+    target_artifact: "idea_map",
+  }, board, {
+    recorder,
+    sessionId: "session-789",
+    traceId: "trace-fallback",
+    plannerProvider: async () => ({
+      spoken_summary: "Bad planner response",
+      reasoning_summary: "This should be replaced.",
+      layout_notes: "Invalid edge.",
+      missing_info: [],
+      board_operations: [
+        { type: "create_edge", id: "edge-1", from: "node-1", to: "missing-node", label: "bad" },
+      ],
+    }),
+  });
+
+  const fallbackEvent = events.find((event) => event.category === "model" && event.action === "whiteboard_planner_fallback");
+  assert.ok(fallbackEvent);
+  assert.ok(fallbackEvent.payload.planner_input);
+  assert.ok(Array.isArray(fallbackEvent.payload.raw_output) || typeof fallbackEvent.payload.raw_output === "object");
+  assert.ok(fallbackEvent.payload.normalized_output);
+  assert.ok(Array.isArray(fallbackEvent.payload.warnings));
+  assert.ok(fallbackEvent.payload.warnings.length >= 1);
+});
+
+test("planner survives recorder failures", async () => {
+  const recorder = {
+    recordEvent() {
+      throw new Error("recorder failed");
+    },
+  };
+  const board = createBoardState();
+
+  const plan = await planWhiteboardOperations({
+    intent_type: "develop_idea_map",
+    user_goal: "Create a process map",
+    target_artifact: "idea_map",
+  }, board, {
+    recorder,
+    sessionId: "session-safe",
+    traceId: "trace-safe",
+    plannerProvider: async () => ({
+      spoken_summary: "I added a process map.",
+      reasoning_summary: "The existing board is empty, so I created a compact starter map.",
+      layout_notes: "Nodes are spaced horizontally with a readable edge.",
+      missing_info: [],
+      board_operations: [
+        { type: "create_node", id: "node-1", text: "Start", x: 120, y: 90 },
+      ],
+    }),
+  });
+
+  assert.equal(plan.used_fallback, false);
+  assert.equal(plan.board_operations.length, 1);
+});

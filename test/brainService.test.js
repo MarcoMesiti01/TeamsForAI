@@ -92,3 +92,39 @@ test("brain uses whiteboard planner for board-first process flow intents", async
   assert.match(result.layout_notes, /process/i);
   assert.equal(typeof result.undo_checkpoint_id, "string");
 });
+
+test("brain forwards recorder metadata through orchestrator routing", async () => {
+  const events = [];
+  const recorder = {
+    recordEvent(event) {
+      events.push(event);
+    },
+  };
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  try {
+    delete process.env.OPENAI_API_KEY;
+
+    const state = {
+      last_task_type: "general",
+      last_user_goal: "",
+      board: createBoardState(),
+    };
+
+    const result = await delegateToBrain({ user_goal: "Say hello" }, state, {
+      recorder,
+      sessionId: "session-brain",
+      traceId: "trace-brain",
+    });
+
+    assert.equal(result.handled_by, "brain");
+    assert.ok(events.some((event) => event.category === "orchestrator" && event.action === "orchestrator_input"));
+    assert.ok(events.every((event) => event.session_id === "session-brain"));
+    assert.ok(events.every((event) => event.trace_id === "trace-brain"));
+  } finally {
+    if (previousApiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousApiKey;
+    }
+  }
+});

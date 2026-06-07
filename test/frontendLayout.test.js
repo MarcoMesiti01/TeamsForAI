@@ -34,3 +34,44 @@ test("frontend polls asynchronous whiteboard jobs", () => {
   assert.match(appJs, /\/board\/jobs\?client_session_id=/, "frontend should poll the board jobs endpoint");
   assert.match(appJs, /trackWhiteboardJob/, "frontend should track jobs returned from tool execution");
 });
+
+test("frontend includes a committed workspace ledger and reasoning undo", () => {
+  ["workspaceLedger", "workspaceStatus", "reasoningUndoBtn"].forEach((id) => {
+    assert.match(html, new RegExp(`id="${id}"`), `expected #${id} in frontend markup`);
+  });
+  assert.match(appJs, /renderWorkspace/);
+  assert.match(appJs, /updateRealtimeBriefing/);
+  assert.match(appJs, /renderWorkspace\(output\.workspace_state\)/);
+  assert.match(appJs, /\/workspace\/undo/);
+  assert.match(appJs, /\/workspace\/state\?client_session_id=/);
+  assert.match(appJs, /session\.update/);
+  assert.match(appJs, /coordinate_reasoning_turn/);
+});
+
+test("frontend labels tentative and committed board nodes", () => {
+  assert.match(appJs, /memory_status/);
+  assert.match(appJs, /exploratory/);
+  assert.match(appJs, /committed/);
+});
+
+test("frontend includes a session log timeline", () => {
+  [
+    "sessionLog",
+    "sessionLogEvents",
+    "refreshSessionLogBtn",
+    "logFilterAll",
+    "logFilterError",
+    "logFilterModel",
+    "logFilterBoard",
+    "logFilterJobs",
+    "logFilterTools",
+    "logFilterSession",
+    "logFilterFrontend",
+  ].forEach((id) => {
+    assert.match(html, new RegExp(`id="${id}"`), `expected #${id} in frontend markup`);
+  });
+  assert.match(appJs, /function renderSessionLog/);
+  assert.match(appJs, /function recordClientEvent/);
+  assert.match(appJs, /\/logs\/session\?client_session_id=/);
+  assert.match(appJs, /\/logs\/client-event/);
+});

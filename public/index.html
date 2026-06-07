@@ -8,9 +8,39 @@
   </head>
   <body>
     <main class="app-shell">
+      <aside class="workspace-ledger" aria-label="Shared reasoning workspace">
+        <div class="workspace-ledger-header">
+          <h2>Reasoning Workspace</h2>
+          <p id="workspaceStatus" class="status">No committed reasoning yet.</p>
+        </div>
+        <div id="workspaceLedger" class="workspace-ledger-content"></div>
+        <button id="reasoningUndoBtn" disabled>Undo Reasoning</button>
+      </aside>
+
       <section class="panel transcript-panel">
         <h2>Transcript</h2>
         <div id="transcript" class="transcript"></div>
+      </section>
+
+      <section class="panel session-log-panel" aria-label="Session log" id="sessionLog">
+        <div class="session-log-header">
+          <div>
+            <h2>Session Log</h2>
+            <p class="muted">Runtime timeline for model, board, tool, job, session, frontend, and error events.</p>
+          </div>
+          <button id="refreshSessionLogBtn" type="button">Refresh</button>
+        </div>
+        <div class="session-log-filters" aria-label="Session log filters">
+          <button id="logFilterAll" type="button" data-log-filter="all" class="active">All</button>
+          <button id="logFilterError" type="button" data-log-filter="error">Errors</button>
+          <button id="logFilterModel" type="button" data-log-filter="model">Model</button>
+          <button id="logFilterBoard" type="button" data-log-filter="board">Board</button>
+          <button id="logFilterJobs" type="button" data-log-filter="whiteboard_job">Jobs</button>
+          <button id="logFilterTools" type="button" data-log-filter="tool">Tools</button>
+          <button id="logFilterSession" type="button" data-log-filter="session">Session</button>
+          <button id="logFilterFrontend" type="button" data-log-filter="frontend">Frontend</button>
+        </div>
+        <div id="sessionLogEvents" class="session-log-events"></div>
       </section>
 
       <section class="panel board-panel">

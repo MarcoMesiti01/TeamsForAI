@@ -37,7 +37,7 @@ body {
 .board-header {
   position: fixed;
   top: 22px;
-  left: 24px;
+  left: 344px;
   z-index: 10;
   pointer-events: none;
 }
@@ -60,7 +60,7 @@ body {
 
 #boardStatus {
   position: fixed;
-  left: 24px;
+  left: 344px;
   bottom: 22px;
   z-index: 10;
   margin: 0;
@@ -91,7 +91,7 @@ body {
 .board-empty {
   position: absolute;
   top: 96px;
-  left: 24px;
+  left: 344px;
   margin: 0;
   padding: 0.7rem 0.85rem;
   border: 1px solid rgba(95, 111, 132, 0.18);
@@ -167,6 +167,16 @@ body {
   user-select: none;
 }
 
+.board-node.exploratory {
+  border-style: dashed;
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.board-node.committed {
+  border-style: solid;
+  border-color: rgba(37, 99, 235, 0.56);
+}
+
 .board-node.primary {
   border-color: #2563eb;
   background: #eff6ff;
@@ -193,10 +203,10 @@ body {
 
 .transcript-panel {
   position: fixed;
-  left: 24px;
+  left: 344px;
   bottom: 66px;
   z-index: 20;
-  width: min(360px, calc(100vw - 380px));
+  width: min(360px, calc(100vw - 704px));
   max-height: 240px;
   padding: 0.8rem;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -223,6 +233,123 @@ body {
   line-height: 1.35;
 }
 
+.session-log-panel {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 30;
+  width: 300px;
+  max-height: 300px;
+  overflow: hidden;
+  padding: 0.9rem;
+  border: 1px solid rgba(95, 111, 132, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #172033;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 20px 55px rgba(29, 41, 57, 0.16);
+}
+
+.session-log-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.session-log-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.session-log-header .muted {
+  margin: 0.25rem 0 0;
+  font-size: 0.78rem;
+}
+
+.session-log-header button,
+.session-log-filters button {
+  min-height: 30px;
+  border: 1px solid rgba(95, 111, 132, 0.24);
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #334155;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.74rem;
+}
+
+.session-log-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.75rem 0;
+}
+
+.session-log-filters button.active {
+  border-color: rgba(37, 99, 235, 0.65);
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.session-log-events {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  max-height: 155px;
+  overflow: auto;
+  padding-right: 0.2rem;
+}
+
+.session-log-event {
+  border: 1px solid rgba(95, 111, 132, 0.18);
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 0.45rem;
+}
+
+.session-log-event.failed {
+  border-color: rgba(220, 38, 38, 0.45);
+}
+
+.session-log-event.warning {
+  border-color: rgba(217, 119, 6, 0.45);
+}
+
+.session-log-event summary {
+  display: grid;
+  grid-template-columns: 58px 1fr auto;
+  gap: 0.4rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.session-log-time,
+.session-log-trace {
+  color: #64748b;
+  font-size: 0.68rem;
+}
+
+.session-log-summary {
+  color: #172033;
+  font-size: 0.76rem;
+  line-height: 1.25;
+}
+
+.session-log-event pre {
+  margin: 0.45rem 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #334155;
+  font-size: 0.7rem;
+}
+
+.session-log-empty {
+  margin: 0;
+  color: #5f6f84;
+  font-size: 0.82rem;
+}
+
 .line {
   margin: 0.3rem 0;
   white-space: pre-wrap;
@@ -238,6 +365,92 @@ body {
 
 .line.system {
   color: #fde68a;
+}
+
+.workspace-ledger {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  z-index: 30;
+  width: 300px;
+  max-height: calc(100vh - 340px);
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid rgba(95, 111, 132, 0.18);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #172033;
+  backdrop-filter: blur(14px);
+  box-shadow: 0 20px 55px rgba(29, 41, 57, 0.16);
+}
+
+.workspace-ledger-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.workspace-ledger-header .status {
+  margin: 0.35rem 0 0;
+  font-size: 0.84rem;
+}
+
+.workspace-ledger-content {
+  margin-top: 0.75rem;
+}
+
+.ledger-section {
+  margin-top: 0.75rem;
+}
+
+.ledger-section h3 {
+  margin: 0 0 0.35rem;
+  color: #334155;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.ledger-entry {
+  margin: 0.35rem 0;
+  padding: 0.5rem 0.55rem;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #172033;
+  font-size: 0.84rem;
+  line-height: 1.3;
+}
+
+.ledger-entry.ai_inferred {
+  border-left: 3px solid #f59e0b;
+}
+
+.ledger-entry.user_stated {
+  border-left: 3px solid #2563eb;
+}
+
+.ledger-provenance {
+  display: block;
+  margin-top: 0.28rem;
+  color: #64748b;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.ledger-empty {
+  margin: 0;
+  padding: 0.65rem;
+  border: 1px dashed rgba(95, 111, 132, 0.28);
+  border-radius: 8px;
+  color: #5f6f84;
+  font-size: 0.84rem;
+}
+
+.workspace-ledger button {
+  width: 100%;
+  margin-top: 0.85rem;
+  background: #334155;
 }
 
 .command-pane {
@@ -336,6 +549,35 @@ button[disabled] {
 }
 
 @media (max-width: 760px) {
+  body {
+    overflow: auto;
+  }
+
+  .app-shell {
+    min-height: 100vh;
+  }
+
+  .workspace-ledger {
+    top: 258px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+    max-height: 190px;
+  }
+
+  .session-log-panel {
+    top: 460px;
+    right: 12px;
+    bottom: auto;
+    left: 12px;
+    width: auto;
+    max-height: 190px;
+  }
+
+  .session-log-events {
+    max-height: 76px;
+  }
+
   .command-pane {
     top: 12px;
     right: 12px;
@@ -360,7 +602,12 @@ button[disabled] {
   }
 
   .board-header {
-    top: 184px;
+    top: 664px;
+    left: 14px;
+  }
+
+  .board-empty {
+    top: 734px;
     left: 14px;
   }
 

@@ -76,6 +76,17 @@ Then open:
 6. Use **Undo** to revert the latest AI or user board operation.
 7. Use **Mute Mic** / **Disconnect** when needed.
 
+## Session Logs
+
+The app records full-fidelity local runtime logs for debugging.
+
+- Local JSONL files are written under `runtime-logs/YYYY-MM-DD.jsonl`.
+- The browser shows a current-session Session Log panel with model, board, job, tool, session, frontend, and error events.
+- Logs include full user text, model prompts, model responses, board operations, board state, and error details.
+- `runtime-logs/` is ignored by git and should stay local.
+
+Use these logs to reconstruct what happened in a session, including what was drawn on the whiteboard and which model/tool path produced it.
+
 ## Test
 
 ```bash

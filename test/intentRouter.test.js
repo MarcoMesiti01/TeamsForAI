@@ -266,3 +266,33 @@ test("builds orchestrator input from realtime delegate context fields", () => {
   assert.equal(input.response_mode, "board_artifact");
   assert.equal(input.candidate_artifact_type, "comparison");
 });
+
+test("orchestrator input event uses info status", async () => {
+  const events = [];
+  const recorder = {
+    recordEvent(event) {
+      events.push(event);
+    },
+  };
+
+  await routeUserIntent({
+    user_goal: "Say hello",
+  }, {
+    recorder,
+    decisionProvider: async () => ({
+      intent_type: "answer_simple",
+      artifact_type: "conversation",
+      should_use_whiteboard: false,
+      route_action: "answer_conversationally",
+      board_strategy: "no_board",
+      visual_summary_goal: "",
+      reason: "This is a casual greeting and does not need a persistent artifact.",
+      confidence: 0.88,
+      required_context: [],
+      preferred_model: "gpt-4.1-mini",
+      tool_plan: [],
+    }),
+  });
+
+  assert.ok(events.some((event) => event.category === "orchestrator" && event.action === "orchestrator_input" && event.status === "info"));
+});

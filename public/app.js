@@ -11,6 +11,10 @@ const boardEl = document.getElementById("board");
 const workspaceLedgerEl = document.getElementById("workspaceLedger");
 const workspaceStatusEl = document.getElementById("workspaceStatus");
 const reasoningUndoBtn = document.getElementById("reasoningUndoBtn");
+const sessionLogEl = document.getElementById("sessionLog");
+const sessionLogEventsEl = document.getElementById("sessionLogEvents");
+const refreshSessionLogBtn = document.getElementById("refreshSessionLogBtn");
+const logFilterButtons = Array.from(document.querySelectorAll("[data-log-filter]"));
 const clientSessionId = crypto.randomUUID();
 
 let pc;
@@ -32,6 +36,9 @@ let reasoningUndoInFlight = false;
 let currentWorkspaceCanUndo = false;
 let lastWorkspaceState = { version: 0, entries: [], working_memory: {}, can_undo: false };
 let latestWorkspaceSyncJobId = null;
+let currentLogFilter = "all";
+let currentSessionEvents = [];
+let sessionLogRefreshTimer = null;
 
 const WORKSPACE_LABELS = {
   problem: "Problem",
@@ -60,6 +67,121 @@ function appendLine(role, text) {
 
 function appendDebug(text) {
   appendLine("system", `[debug] ${text}`);
+}
+
+function summarizeEvent(event) {
+  const status = event.status ? `${event.status}: ` : "";
+  return `${status}${event.summary || `${event.category || "event"} ${event.action || ""}`.trim()}`;
+}
+
+function renderSessionLog(events = currentSessionEvents) {
+  if (!sessionLogEventsEl) return;
+  currentSessionEvents = Array.isArray(events) ? events : [];
+  clearElement(sessionLogEventsEl);
+
+  const filteredEvents = currentSessionEvents
+    .filter((event) => {
+      if (currentLogFilter === "all") return true;
+      if (currentLogFilter === "error") return event.status === "failed" || event.status === "error";
+      return event.category === currentLogFilter;
+    })
+    .slice(-80)
+    .reverse();
+
+  if (!filteredEvents.length) {
+    const empty = document.createElement("p");
+    empty.className = "session-log-empty";
+    empty.textContent = "No events for this filter yet.";
+    sessionLogEventsEl.appendChild(empty);
+    return;
+  }
+
+  filteredEvents.forEach((event) => {
+    const details = document.createElement("details");
+    details.className = `session-log-event ${event.status || "info"}`;
+
+    const summary = document.createElement("summary");
+    const time = document.createElement("span");
+    time.className = "session-log-time";
+    time.textContent = event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : "--:--";
+    const text = document.createElement("span");
+    text.className = "session-log-summary";
+    text.textContent = summarizeEvent(event);
+    const trace = document.createElement("span");
+    trace.className = "session-log-trace";
+    trace.textContent = event.trace_id ? event.trace_id.slice(0, 12) : "";
+    summary.append(time, text, trace);
+
+    const payload = document.createElement("pre");
+    payload.textContent = JSON.stringify({
+      category: event.category,
+      action: event.action,
+      payload: event.payload || null,
+    }, null, 2);
+
+    details.append(summary, payload);
+    sessionLogEventsEl.appendChild(details);
+  });
+}
+
+async function loadSessionLog() {
+  if (!sessionLogEventsEl) return;
+  try {
+    const resp = await fetch(`/logs/session?client_session_id=${encodeURIComponent(clientSessionId)}`);
+    const output = await resp.json();
+    renderSessionLog(output.events || []);
+  } catch (error) {
+    renderSessionLog([{
+      timestamp: new Date().toISOString(),
+      category: "frontend",
+      action: "session_log_load",
+      status: "failed",
+      summary: "Could not load session log",
+      payload: { error: error.message },
+    }, ...currentSessionEvents]);
+  }
+}
+
+async function recordClientEvent(action, status, summary, payload = {}) {
+  try {
+    const resp = await fetch("/logs/client-event", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_session_id: clientSessionId,
+        action,
+        status,
+        summary,
+        payload,
+      }),
+    });
+    const output = await resp.json();
+    if (output.event) {
+      currentSessionEvents.push(output.event);
+      renderSessionLog();
+    }
+  } catch {
+    // Client logging must never interrupt voice, tools, or board interaction.
+  }
+}
+
+function setLogFilter(filter) {
+  currentLogFilter = filter || "all";
+  logFilterButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.logFilter === currentLogFilter);
+  });
+  renderSessionLog();
+}
+
+function startSessionLogRefresh() {
+  if (sessionLogRefreshTimer || !sessionLogEl) return;
+  sessionLogRefreshTimer = window.setInterval(loadSessionLog, 1500);
+}
+
+function stopSessionLogRefresh() {
+  if (!sessionLogRefreshTimer) return;
+  window.clearInterval(sessionLogRefreshTimer);
+  sessionLogRefreshTimer = null;
 }
 
 function setWorkspaceSyncStatus(job) {
@@ -866,9 +988,14 @@ disconnectBtn.addEventListener("click", disconnect);
 micBtn.addEventListener("click", toggleMic);
 undoBtn.addEventListener("click", undoBoard);
 reasoningUndoBtn.addEventListener("click", undoReasoning);
+if (refreshSessionLogBtn) refreshSessionLogBtn.addEventListener("click", loadSessionLog);
+logFilterButtons.forEach((button) => {
+  button.addEventListener("click", () => setLogFilter(button.dataset.logFilter));
+});
 window.addEventListener("pointermove", moveDraggedNode);
 window.addEventListener("pointerup", finishNodeDrag);
 window.addEventListener("pointercancel", finishNodeDrag);
 renderBoard({ version: 0, nodes: [], edges: [], groups: [], can_undo: false });
 renderWorkspace({ version: 0, entries: [], working_memory: {}, can_undo: false });
 void loadWorkspace();
+void loadSessionLog();

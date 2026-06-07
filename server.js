@@ -477,12 +477,21 @@ app.post("/tools/execute", async (req, res) => {
       if (toolArgs.selected_item && typeof toolArgs.selected_item === "object") {
         state.selected_item = toolArgs.selected_item;
       }
-      const result = await coordinateReasoningTurn(toolArgs, state, reasoningCoordinatorOptions);
+      const result = await coordinateReasoningTurn(toolArgs, state, {
+        ...reasoningCoordinatorOptions,
+        recorder: defaultEventRecorder,
+        session_id: clientSessionId,
+        trace_id: traceId,
+      });
       let whiteboardJob = null;
       if (result.board_command) {
         const job = createWhiteboardJob(state, {
           ...result.board_command,
           expected_workspace_version: state.workspace.version,
+        }, {
+          recorder: defaultEventRecorder,
+          session_id: clientSessionId,
+          trace_id: traceId,
         });
         whiteboardJob = {
           job_id: job.job_id,
@@ -493,12 +502,26 @@ app.post("/tools/execute", async (req, res) => {
         };
       }
       sessionStateStore.set(clientSessionId, state);
-      return res.json({
+      const responseBody = {
         ...result,
         whiteboard_job: whiteboardJob,
         board_state: getBoardSnapshot(state.board),
         realtime_session_instructions: `${TOOLING_INSTRUCTIONS}\n\n${result.workspace_briefing || buildRealtimeWorkspaceBriefing(state.workspace)}`,
+      };
+      logRouteEvent({
+        sessionId: clientSessionId,
+        traceId,
+        category: "tool",
+        action: "execute",
+        status: "completed",
+        summary: "Tool execution completed.",
+        payload: {
+          tool_name: toolName,
+          response: responseBody,
+          duration_ms: durationMs(startedAt),
+        },
       });
+      return res.json(responseBody);
     }
 
     if (toolName === "delegate_to_orchestrator" || toolName === "route_user_intent" || toolName === "delegate_to_brain") {

@@ -119,6 +119,13 @@ Expected behavior:
 
 You can drag any generated card. On drop, the browser sends a `move_item` operation to the server, receives updated board state, and keeps the move undoable.
 
+## Session Logs
+
+- The backend records model calls, tool execution, board operations, whiteboard jobs, session setup, and frontend-only failures.
+- Recent events are available in the browser Session Log panel and through `GET /logs/session?client_session_id=...`.
+- Every event is also appended locally as JSONL under `runtime-logs/YYYY-MM-DD.jsonl`; `runtime-logs/` is ignored by git.
+- Whiteboard drawing is reconstructable from logged board/job events because payloads include raw operations, validated operations, board snapshots, job state, and drag updates.
+
 ### Delegation criteria (cost control)
 
 Controller should delegate when task requires:

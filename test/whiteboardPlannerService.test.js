@@ -4,6 +4,38 @@ const assert = require("node:assert/strict");
 const { createBoardState, applyBoardOperations } = require("../lib/boardState");
 const { buildWhiteboardPlanInput, planWhiteboardOperations } = require("../lib/whiteboardPlannerService");
 
+function findOpenObjectSchema(schema, path = []) {
+  if (!schema || typeof schema !== "object") return null;
+
+  const isObjectSchema = schema.type === "object" || schema.properties;
+  if (isObjectSchema && schema.additionalProperties !== false) {
+    return path.join(".") || "<root>";
+  }
+
+  if (schema.properties) {
+    for (const [key, child] of Object.entries(schema.properties)) {
+      const result = findOpenObjectSchema(child, [...path, "properties", key]);
+      if (result) return result;
+    }
+  }
+
+  if (schema.items) {
+    const result = findOpenObjectSchema(schema.items, [...path, "items"]);
+    if (result) return result;
+  }
+
+  for (const keyword of ["anyOf", "oneOf", "allOf"]) {
+    if (Array.isArray(schema[keyword])) {
+      for (let index = 0; index < schema[keyword].length; index += 1) {
+        const result = findOpenObjectSchema(schema[keyword][index], [...path, keyword, String(index)]);
+        if (result) return result;
+      }
+    }
+  }
+
+  return null;
+}
+
 test("builds planner input with board snapshot, supported operations, layout constraints, and session context", () => {
   const board = createBoardState();
   const workspaceContext = {
@@ -173,6 +205,60 @@ test("planner uses strict JSON planner output when operations validate", async (
   assert.equal(plan.layout_notes, "Nodes are spaced horizontally with a readable edge.");
   assert.deepEqual(plan.board_operations.map((operation) => operation.type), ["create_node", "create_node", "create_edge"]);
   assert.deepEqual(plan.validation_warnings, []);
+});
+
+test("planner model request uses strict provider-compatible operation schemas", async () => {
+  const board = createBoardState();
+  const events = [];
+  const plan = await planWhiteboardOperations({
+    intent_type: "develop_idea_map",
+    user_goal: "Create one node for the launch plan.",
+    target_artifact: "idea_map",
+    should_use_whiteboard: true,
+  }, board, {
+    apiKey: "test-key",
+    recorder: {
+      recordEvent(event) {
+        events.push(event);
+      },
+    },
+    fetchImpl: async (_url, request) => {
+      const body = JSON.parse(request.body);
+      const openPath = findOpenObjectSchema(body.text.format.schema);
+      if (openPath) {
+        return {
+          ok: false,
+          json: async () => ({
+            error: {
+              message: `Invalid schema for response_format 'whiteboard_plan': object schema is open at ${openPath}.`,
+            },
+          }),
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          output_text: JSON.stringify({
+            spoken_summary: "Added the launch plan node.",
+            reasoning_summary: "Strict whiteboard schema was accepted by the provider.",
+            layout_notes: "One node near the top-left.",
+            missing_info: [],
+            board_operations: [
+              { type: "create_node", id: "node-launch-plan", text: "Launch plan", x: 120, y: 90 },
+            ],
+          }),
+        }),
+      };
+    },
+  });
+
+  assert.equal(plan.used_fallback, false);
+  assert.equal(plan.reasoning_summary, "Strict whiteboard schema was accepted by the provider.");
+  assert.deepEqual(plan.board_operations, [
+    { type: "create_node", id: "node-launch-plan", text: "Launch plan", x: 120, y: 90 },
+  ]);
+  assert.ok(!events.some((event) => event.action === "whiteboard_planner_fallback"));
 });
 
 test("planner falls back to fixture when planner output has invalid operations", async () => {

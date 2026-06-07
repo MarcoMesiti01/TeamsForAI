@@ -155,6 +155,57 @@ test("coordinate_reasoning_turn commits workspace entries and queues board sync"
   });
 });
 
+test("coordinate_reasoning_turn falls back to spoken_context when user goal and utterance are absent", async () => {
+  await withServer(async (baseUrl) => {
+    let updateUtterance = "";
+    let responseUtterance = "";
+    setReasoningCoordinatorOptionsForTest({
+      updateProvider: async (modelInput) => {
+        updateUtterance = modelInput.utterance;
+        return {
+          action: "update",
+          operations: [{
+            type: "update_working_memory",
+            summary: modelInput.utterance,
+            current_topic: "Launch path comparison",
+          }],
+          spoken_commit_notice: "I captured the launch path context.",
+        };
+      },
+      responseProvider: async (modelInput) => {
+        responseUtterance = modelInput.utterance;
+        return {
+          spoken_summary: "I captured the launch path context.",
+          full_response: "The workspace now tracks the launch path comparison.",
+          reasoning_summary: "Grounded in the spoken context fallback.",
+          uncertainties: [],
+          next_examination: "",
+        };
+      },
+      routeProvider: async () => conversationalDecision(),
+    });
+
+    const result = await postJson(baseUrl, "/tools/execute", {
+      name: "coordinate_reasoning_turn",
+      client_session_id: "spoken-context-session",
+      arguments: {
+        spoken_context: "Compare enterprise pilots with self-serve launch.",
+        conversation_summary: "",
+        visible_board_context: "",
+        user_preference: "",
+        response_mode: "short_answer",
+        turn_id: "turn-spoken-context",
+      },
+    });
+
+    assert.equal(result.handled_by, "turn_coordinator");
+    assert.equal(result.action, "update");
+    assert.equal(updateUtterance, "Compare enterprise pilots with self-serve launch.");
+    assert.equal(responseUtterance, "Compare enterprise pilots with self-serve launch.");
+    assert.equal(result.workspace_state.working_memory.summary, "Compare enterprise pilots with self-serve launch.");
+  });
+});
+
 test("workspace state is isolated per client_session_id", async () => {
   await withServer(async (baseUrl) => {
     setReasoningCoordinatorOptionsForTest({

@@ -5,6 +5,38 @@ const { routeUserIntent } = require("../lib/intentRouter");
 const { buildOrchestratorInput } = require("../lib/orchestratorService");
 const { createBoardState, applyBoardOperations } = require("../lib/boardState");
 
+function findOpenObjectSchema(schema, path = []) {
+  if (!schema || typeof schema !== "object") return null;
+
+  const isObjectSchema = schema.type === "object" || schema.properties;
+  if (isObjectSchema && schema.additionalProperties !== false) {
+    return path.join(".") || "<root>";
+  }
+
+  if (schema.properties) {
+    for (const [key, child] of Object.entries(schema.properties)) {
+      const result = findOpenObjectSchema(child, [...path, "properties", key]);
+      if (result) return result;
+    }
+  }
+
+  if (schema.items) {
+    const result = findOpenObjectSchema(schema.items, [...path, "items"]);
+    if (result) return result;
+  }
+
+  for (const keyword of ["anyOf", "oneOf", "allOf"]) {
+    if (Array.isArray(schema[keyword])) {
+      for (let index = 0; index < schema[keyword].length; index += 1) {
+        const result = findOpenObjectSchema(schema[keyword][index], [...path, keyword, String(index)]);
+        if (result) return result;
+      }
+    }
+  }
+
+  return null;
+}
+
 function modelDecision(overrides = {}) {
   return {
     intent_type: "develop_idea_map",
@@ -295,4 +327,46 @@ test("orchestrator input event uses info status", async () => {
   });
 
   assert.ok(events.some((event) => event.category === "orchestrator" && event.action === "orchestrator_input" && event.status === "info"));
+});
+
+test("orchestrator model request uses strict provider-compatible object schemas", async () => {
+  const events = [];
+  const intent = await routeUserIntent({
+    user_goal: "Map the architecture for this voice whiteboard.",
+  }, {
+    apiKey: "test-key",
+    recorder: {
+      recordEvent(event) {
+        events.push(event);
+      },
+    },
+    fetchImpl: async (_url, request) => {
+      const body = JSON.parse(request.body);
+      const openPath = findOpenObjectSchema(body.text.format.schema);
+      if (openPath) {
+        return {
+          ok: false,
+          json: async () => ({
+            error: {
+              message: `Invalid schema for response_format 'orchestrator_decision': object schema is open at ${openPath}.`,
+            },
+          }),
+        };
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          output_text: JSON.stringify(modelDecision({
+            reason: "Strict orchestrator schema was accepted by the provider.",
+            preferred_model: "strict-router",
+          })),
+        }),
+      };
+    },
+  });
+
+  assert.equal(intent.reason, "Strict orchestrator schema was accepted by the provider.");
+  assert.equal(intent.preferred_model, "strict-router");
+  assert.ok(!events.some((event) => event.action === "orchestrator_fallback"));
 });

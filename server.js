@@ -94,6 +94,33 @@ function summarizeRealtimeCallFailure(response, responseText) {
   return `OpenAI Realtime service returned ${statusText}.`;
 }
 
+function summarizeToolArguments(toolArgs = {}) {
+  if (!toolArgs || typeof toolArgs !== "object" || Array.isArray(toolArgs)) {
+    return {
+      argument_keys: [],
+      present_text_fields: [],
+    };
+  }
+
+  const argumentKeys = Object.keys(toolArgs).sort();
+  const presentTextFields = [
+    "user_goal",
+    "utterance",
+    "spoken_context",
+    "conversation_summary",
+    "visible_board_context",
+    "response_mode",
+    "candidate_artifact_type",
+    "turn_id",
+  ].filter((key) => typeof toolArgs[key] === "string" && toolArgs[key].trim());
+
+  return {
+    argument_keys: argumentKeys,
+    present_text_fields: presentTextFields,
+    has_selected_item: Boolean(toolArgs.selected_item && typeof toolArgs.selected_item === "object"),
+  };
+}
+
 function selectRealtimeSessionOptions(query = {}) {
   const frontendModelOverride = String(query?.model || "").trim();
   const requestedVoice = String(query?.voice || "").trim();
@@ -137,11 +164,11 @@ const TOOL_DEFINITIONS = [
       properties: {
         user_goal: {
           type: "string",
-          description: "The user's substantive objective or utterance in plain language.",
+          description: "The user's substantive objective in plain language. Provide this when utterance is absent.",
         },
         utterance: {
           type: "string",
-          description: "Verbatim or near-verbatim spoken user turn when available.",
+          description: "Verbatim or near-verbatim spoken user turn when available. Provide this when user_goal is absent.",
         },
         spoken_context: {
           type: "string",
@@ -173,15 +200,12 @@ const TOOL_DEFINITIONS = [
         },
       },
       required: [
+        "user_goal",
         "spoken_context",
         "conversation_summary",
         "visible_board_context",
         "user_preference",
         "response_mode",
-      ],
-      anyOf: [
-        { required: ["user_goal"] },
-        { required: ["utterance"] },
       ],
       additionalProperties: false,
     },
@@ -285,6 +309,7 @@ const TOOLING_INSTRUCTIONS = [
   "Answer directly for short conversational responses, greetings, and simple factual replies that do not need persistent shared context.",
   "Call coordinate_reasoning_turn for substantive reasoning, continuity across turns, corrections to remembered reasoning, reasoning undo, comparisons, design or planning work, and any workspace-backed board work.",
   "Call coordinate_reasoning_turn when the user is externalizing thought, comparing options, designing, planning, mapping relationships, referring to prior reasoning, or updating committed memory.",
+  "When calling coordinate_reasoning_turn, include at least one of user_goal or utterance.",
   "Call submit_whiteboard_command directly only when the user gives a narrow board edit that does not change reasoning memory, such as changing, connecting, moving, grouping, emphasizing, or deleting a board item.",
   "For board work, acknowledge quickly; the backend queues the visual update and the browser shows it when ready.",
   "Ask a brief clarification yourself when the artifact goal is ambiguous enough that delegation would not have a clear target.",
@@ -632,6 +657,7 @@ app.post("/tools/execute", async (req, res) => {
       summary: "Tool execution started.",
       payload: {
         tool_name: toolName || null,
+        ...summarizeToolArguments(toolArgs),
         duration_ms: durationMs(startedAt),
       },
     });

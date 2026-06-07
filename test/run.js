@@ -10,6 +10,7 @@ require("./whiteboardCommandService.test");
 require("./whiteboardPlannerService.test");
 require("./whiteboardJobService.test");
 require("./brainService.test");
+require("./frontendConnectFlow.test");
 require("./frontendLayout.test");
 require("./reasoningWorkspace.test");
 require("./workspaceContext.test");

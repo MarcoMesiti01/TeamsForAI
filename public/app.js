@@ -69,6 +69,29 @@ function appendDebug(text) {
   appendLine("system", `[debug] ${text}`);
 }
 
+async function readSessionError(response) {
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  const fallback = `Realtime connection failed with HTTP ${response.status}.`;
+  const text = await response.text();
+
+  if (contentType.includes("json")) {
+    try {
+      const payload = JSON.parse(text);
+      return [payload.error, payload.details].filter(Boolean).join(" ") || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  if (contentType.includes("html")) {
+    return fallback;
+  }
+
+  const compactText = text.replace(/\s+/g, " ").trim();
+  if (!compactText) return fallback;
+  return compactText.length > 180 ? `${compactText.slice(0, 177)}...` : compactText;
+}
+
 function summarizeEvent(event) {
   const status = event.status ? `${event.status}: ` : "";
   return `${status}${event.summary || `${event.category || "event"} ${event.action || ""}`.trim()}`;
@@ -913,8 +936,7 @@ async function connect() {
     });
 
     if (!sdpResp.ok) {
-      const text = await sdpResp.text();
-      throw new Error(`SDP exchange failed: ${text}`);
+      throw new Error(await readSessionError(sdpResp));
     }
 
     const answerSdp = await sdpResp.text();

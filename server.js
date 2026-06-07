@@ -58,6 +58,42 @@ function logRouteEvent({ sessionId, traceId, category, action, status, summary, 
   });
 }
 
+function tryParseJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+function getHttpStatusLabel(status) {
+  if (status === 429) return "Rate Limited";
+  if (status === 500) return "Internal Server Error";
+  if (status === 502) return "Bad Gateway";
+  if (status === 503) return "Service Unavailable";
+  if (status === 504) return "Gateway Timeout";
+  return "";
+}
+
+function summarizeRealtimeCallFailure(response, responseText) {
+  const status = Number(response?.status) || 0;
+  const contentType = String(response?.headers?.get?.("content-type") || "").toLowerCase();
+  const parsed = contentType.includes("json") ? tryParseJson(responseText) : null;
+  const message = parsed?.error?.message || parsed?.error || parsed?.message;
+
+  if (typeof message === "string" && message.trim()) {
+    return message.trim();
+  }
+
+  const statusLabel = getHttpStatusLabel(status);
+  const statusText = status ? `HTTP ${status}${statusLabel ? ` ${statusLabel}` : ""}` : "an upstream error";
+  if (status >= 500 || contentType.includes("html")) {
+    return `OpenAI Realtime service returned ${statusText}. Please try again shortly.`;
+  }
+
+  return `OpenAI Realtime service returned ${statusText}.`;
+}
+
 app.use(express.text({ type: ["application/sdp", "text/plain"] }));
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
@@ -390,7 +426,7 @@ app.post("/session", async (req, res) => {
       });
       return res.status(response.status).json({
         error: "Failed to create realtime call.",
-        details: responseText,
+        details: summarizeRealtimeCallFailure(response, responseText),
         debug: {
           sdp_length: sdpOffer.length,
           sdp_first_line: sdpPreview,

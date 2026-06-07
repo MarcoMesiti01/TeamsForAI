@@ -119,3 +119,10 @@ test("frontend includes a session log timeline", () => {
   assert.match(appJs, /\/logs\/session\?client_session_id=/);
   assert.match(appJs, /\/logs\/client-event/);
 });
+
+test("frontend parses session failures before displaying and logging them", () => {
+  assert.match(appJs, /async function readSessionError/);
+  assert.match(appJs, /await readSessionError\(sdpResp\)/);
+  assert.match(appJs, /contentType\.includes\("json"\)/);
+  assert.doesNotMatch(appJs, /SDP exchange failed: \$\{text\}/);
+});

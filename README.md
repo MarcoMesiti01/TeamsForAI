@@ -14,9 +14,9 @@ Localhost web app that connects to the OpenAI Realtime API with voice input/outp
   - Optional model field that overrides only the realtime controller model
 - **Voice controller + router + brain split**
   - Realtime model acts as low-latency voice controller
-  - Single high-level tool: `route_user_intent`
-  - Backend router converts spoken goals into structured JSON intent
-  - Backend Brain handles deeper reasoning and produces board operations
+  - Main reasoning tool: `coordinate_reasoning_turn`
+  - Backend coordinator updates shared reasoning memory before deeper analysis
+  - Backend router and Brain still handle visual routing, deeper reasoning, and board operations
 - **Milestone 1 board protocol**
   - Supports typed operations: `create_node`, `update_node`, `create_edge`, `create_group`, `move_item`, `emphasize_item`, `delete_item`, and `undo`
   - Stores board changes in an append-only operation log
@@ -76,16 +76,19 @@ Then open:
 6. Use **Undo** to revert the latest AI or user board operation.
 7. Use **Mute Mic** / **Disconnect** when needed.
 
-## Session Logs
+## Voice reasoning workspace
 
-The app records full-fidelity local runtime logs for debugging.
+Substantive spoken turns update a session-only reasoning workspace. The ledger shows the committed structured context for the current session: problem statements, objectives, constraints, assumptions, options, criteria, decisions, and open questions. The board visualizes the same reasoning so spoken continuity, ledger state, and board state stay aligned.
 
-- Local JSONL files are written under `runtime-logs/YYYY-MM-DD.jsonl`.
-- The browser shows a current-session Session Log panel with model, board, job, tool, session, frontend, and error events.
-- Logs include full user text, model prompts, model responses, board operations, board state, and error details.
-- `runtime-logs/` is ignored by git and should stay local.
+Workspace extraction reuses `ORCHESTRATOR_MODEL`, and grounded response generation reuses `BRAIN_MODEL`. No new model-role environment variable is introduced for this workflow.
 
-Use these logs to reconstruct what happened in a session, including what was drawn on the whiteboard and which model/tool path produced it.
+### Manual voice acceptance check
+
+1. Start a live voice session and state a problem requiring structured thought.
+2. Confirm the assistant responds and the ledger/board show aligned structured context.
+3. Refer to a prior item without repeating its details; confirm continuity.
+4. Correct an inferred assumption by voice; confirm the ledger records the correction.
+5. Confirm the subsequent answer and board reflect the corrected context.
 
 ## Test
 
@@ -107,11 +110,11 @@ Try saying:
 
 Expected behavior:
 
-1. Realtime controller calls `route_user_intent`
-2. Router returns structured intent for an `idea_map`
-3. Brain creates typed board operations
-4. Server applies the operations to session board state
-5. UI renders the DOM/SVG whiteboard and enables Undo
+1. Realtime controller calls `coordinate_reasoning_turn`
+2. Coordinator updates working memory or committed reasoning entries
+3. Router and Brain decide whether the board needs an `idea_map`
+4. Server queues typed board operations and returns the current workspace state
+5. UI renders the reasoning ledger plus the DOM/SVG whiteboard and enables the relevant Undo controls
 6. Realtime controller speaks the concise `spoken_summary`
 
 You can drag any generated card. On drop, the browser sends a `move_item` operation to the server, receives updated board state, and keeps the move undoable.

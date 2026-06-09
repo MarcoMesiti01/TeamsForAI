@@ -36,6 +36,42 @@ function findOpenObjectSchema(schema, path = []) {
   return null;
 }
 
+function findObjectSchemaWithMissingRequiredProperties(schema, path = []) {
+  if (!schema || typeof schema !== "object") return null;
+
+  const isObjectSchema = schema.type === "object" || schema.properties;
+  if (isObjectSchema && schema.properties) {
+    const required = Array.isArray(schema.required) ? schema.required : [];
+    const missing = Object.keys(schema.properties).filter((key) => !required.includes(key));
+    if (missing.length) {
+      return `${path.join(".") || "<root>"} missing required: ${missing.join(", ")}`;
+    }
+  }
+
+  if (schema.properties) {
+    for (const [key, child] of Object.entries(schema.properties)) {
+      const result = findObjectSchemaWithMissingRequiredProperties(child, [...path, "properties", key]);
+      if (result) return result;
+    }
+  }
+
+  if (schema.items) {
+    const result = findObjectSchemaWithMissingRequiredProperties(schema.items, [...path, "items"]);
+    if (result) return result;
+  }
+
+  for (const keyword of ["anyOf", "oneOf", "allOf"]) {
+    if (Array.isArray(schema[keyword])) {
+      for (let index = 0; index < schema[keyword].length; index += 1) {
+        const result = findObjectSchemaWithMissingRequiredProperties(schema[keyword][index], [...path, keyword, String(index)]);
+        if (result) return result;
+      }
+    }
+  }
+
+  return null;
+}
+
 test("builds planner input with board snapshot, supported operations, layout constraints, and session context", () => {
   const board = createBoardState();
   const workspaceContext = {
@@ -225,12 +261,23 @@ test("planner model request uses strict provider-compatible operation schemas", 
     fetchImpl: async (_url, request) => {
       const body = JSON.parse(request.body);
       const openPath = findOpenObjectSchema(body.text.format.schema);
+      const missingRequiredPath = findObjectSchemaWithMissingRequiredProperties(body.text.format.schema);
       if (openPath) {
         return {
           ok: false,
           json: async () => ({
             error: {
               message: `Invalid schema for response_format 'whiteboard_plan': object schema is open at ${openPath}.`,
+            },
+          }),
+        };
+      }
+      if (missingRequiredPath) {
+        return {
+          ok: false,
+          json: async () => ({
+            error: {
+              message: `Invalid schema for response_format 'whiteboard_plan': required must include every property at ${missingRequiredPath}.`,
             },
           }),
         };

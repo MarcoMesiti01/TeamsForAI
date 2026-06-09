@@ -206,6 +206,84 @@ test("coordinate_reasoning_turn falls back to spoken_context when user goal and 
   });
 });
 
+test("coordinate_reasoning_turn recovers from conversation summary when current-turn fields are absent", async () => {
+  await withServer(async (baseUrl) => {
+    let updateUtterance = "";
+    setReasoningCoordinatorOptionsForTest({
+      updateProvider: async (modelInput) => {
+        updateUtterance = modelInput.utterance;
+        return {
+          action: "update",
+          operations: [{
+            type: "update_working_memory",
+            summary: modelInput.utterance,
+            current_topic: "Launch path comparison",
+          }],
+          spoken_commit_notice: "I recovered the turn from the conversation summary.",
+        };
+      },
+      responseProvider: async () => ({
+        spoken_summary: "I captured the launch path comparison.",
+        full_response: "",
+        reasoning_summary: "",
+        uncertainties: [],
+        next_examination: "",
+      }),
+      routeProvider: async () => conversationalDecision(),
+    });
+
+    const result = await postJson(baseUrl, "/tools/execute", {
+      name: "coordinate_reasoning_turn",
+      client_session_id: "summary-fallback-session",
+      arguments: {
+        conversation_summary: "The user is comparing enterprise pilots with self-serve launch.",
+        visible_board_context: "",
+        user_preference: "",
+        response_mode: "short_answer",
+        turn_id: "turn-summary-fallback",
+      },
+    });
+
+    assert.equal(result.handled_by, "turn_coordinator");
+    assert.equal(result.action, "update");
+    assert.equal(updateUtterance, "The user is comparing enterprise pilots with self-serve launch.");
+
+    const logs = await getJson(`${baseUrl}/logs/session?client_session_id=summary-fallback-session`);
+    assert.ok(logs.events.some((event) => event.category === "frontend" && event.action === "invalid_tool_arguments"));
+  });
+});
+
+test("coordinate_reasoning_turn empty arguments ask for clarification instead of failing", async () => {
+  await withServer(async (baseUrl) => {
+    let updateCalled = false;
+    setReasoningCoordinatorOptionsForTest({
+      updateProvider: async () => {
+        updateCalled = true;
+        return {
+          action: "update",
+          operations: [],
+        };
+      },
+    });
+
+    const result = await postJson(baseUrl, "/tools/execute", {
+      name: "coordinate_reasoning_turn",
+      client_session_id: "empty-args-session",
+      arguments: {},
+    });
+
+    assert.equal(updateCalled, false);
+    assert.equal(result.handled_by, "turn_coordinator");
+    assert.equal(result.action, "clarify");
+    assert.equal(result.board_sync_required, false);
+    assert.equal(result.whiteboard_job, null);
+
+    const logs = await getJson(`${baseUrl}/logs/session?client_session_id=empty-args-session`);
+    assert.ok(logs.events.some((event) => event.category === "frontend" && event.action === "invalid_tool_arguments"));
+    assert.ok(logs.events.some((event) => event.category === "tool" && event.action === "execute" && event.status === "completed"));
+  });
+});
+
 test("workspace state is isolated per client_session_id", async () => {
   await withServer(async (baseUrl) => {
     setReasoningCoordinatorOptionsForTest({

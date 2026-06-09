@@ -326,3 +326,65 @@ test("result includes realtime workspace briefing containing committed entries",
   assert.match(result.workspace_briefing, /Use canary rollout/);
   assert.match(result.workspace_briefing, /Reasoning undo available: yes/);
 });
+
+test("uses conversation summary when realtime tool omits user goal, utterance, and spoken context", async () => {
+  const state = createState();
+  const events = [];
+  let updateUtterance = "";
+
+  const result = await coordinateReasoningTurn({
+    turn_id: "turn-summary-only",
+    conversation_summary: "The user is comparing enterprise pilots with self-serve launch.",
+  }, state, {
+    recorder: {
+      recordEvent(event) {
+        events.push(event);
+      },
+    },
+    updateProvider: async (modelInput) => {
+      updateUtterance = modelInput.utterance;
+      return {
+        action: "update",
+        operations: [{
+          type: "update_working_memory",
+          summary: modelInput.utterance,
+          current_topic: "Launch path comparison",
+        }],
+      };
+    },
+    responseProvider: async () => ({ spoken_summary: "I captured the launch path comparison." }),
+    routeProvider: async () => conversationalDecision(),
+  });
+
+  assert.equal(result.action, "update");
+  assert.equal(updateUtterance, "The user is comparing enterprise pilots with self-serve launch.");
+  assert.equal(result.workspace_state.working_memory.current_topic, "Launch path comparison");
+  assert.ok(events.some((event) => event.category === "frontend" && event.action === "invalid_tool_arguments"));
+});
+
+test("empty realtime tool arguments return clarification instead of throwing", async () => {
+  const state = createState();
+  const events = [];
+  let updateCalled = false;
+
+  const result = await coordinateReasoningTurn({}, state, {
+    recorder: {
+      recordEvent(event) {
+        events.push(event);
+      },
+    },
+    updateProvider: async () => {
+      updateCalled = true;
+      return {
+        action: "update",
+        operations: [],
+      };
+    },
+  });
+
+  assert.equal(updateCalled, false);
+  assert.equal(result.action, "clarify");
+  assert.equal(result.board_sync_required, false);
+  assert.equal(result.workspace_state.version, 0);
+  assert.ok(events.some((event) => event.category === "frontend" && event.action === "invalid_tool_arguments"));
+});

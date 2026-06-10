@@ -54,7 +54,24 @@ test("creates ids and default session values when caller omits them", () => {
 
   assert.equal(event.session_id, "default");
   assert.ok(event.trace_id.startsWith("trace-"));
+  assert.equal(event.source_type, "dev");
   assert.equal(event.payload, null);
+});
+
+test("records explicit source type for live/test log separation", () => {
+  const recorder = createEventRecorder({ logDir: makeTempDir() });
+
+  const event = recorder.recordEvent({
+    session_id: "session-a",
+    source_type: "test",
+    category: "tool",
+    action: "execute",
+    status: "completed",
+    summary: "Tool completed",
+  });
+
+  assert.equal(event.source_type, "test");
+  assert.equal(recorder.getSessionEvents("session-a")[0].source_type, "test");
 });
 
 test("creates trace ids with the requested prefix", () => {

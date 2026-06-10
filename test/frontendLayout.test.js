@@ -39,9 +39,12 @@ test("frontend realtime model selector avoids stale preview models", () => {
 
 test("frontend polls asynchronous whiteboard jobs", () => {
   assert.match(appJs, /pendingWhiteboardJobs/, "frontend should track pending whiteboard jobs");
-  assert.match(appJs, /\/board\/jobs\?client_session_id=/, "frontend should poll the board jobs endpoint");
+  assert.match(appJs, /\/board\/jobs\?client_session_id=.*quiet=1/, "frontend should poll the board jobs endpoint quietly");
   assert.match(appJs, /trackWhiteboardJob/, "frontend should track jobs returned from tool execution");
   assert.match(appJs, /workspaceSyncJobs/, "frontend should track workspace-backed sync jobs separately");
+  assert.match(appJs, /BOARD_JOB_INITIAL_POLL_DELAY_MS/, "frontend should use adaptive job polling");
+  assert.match(appJs, /BOARD_JOB_MAX_POLL_DELAY_MS/, "frontend should cap adaptive job polling delay");
+  assert.match(appJs, /recordBoardJobPollSummary/, "frontend should log one polling summary instead of every poll");
 });
 
 test("frontend includes a committed workspace ledger and reasoning undo", () => {
@@ -69,7 +72,8 @@ test("frontend labels tentative and committed board nodes", () => {
 
 test("frontend surfaces workspace-to-board synchronization status without marking reasoning failed", () => {
   assert.match(appJs, /setWorkspaceSyncStatus/);
-  assert.match(appJs, /Workspace updated; synchronizing board\.\.\./);
+  assert.match(appJs, /Reasoning complete; board updating\.\.\./);
+  assert.match(appJs, /Board updated\./);
   assert.match(appJs, /Workspace is current; visual board update failed\./);
   assert.match(appJs, /Workspace is current; visual board update needs clarification\./);
   assert.match(appJs, /job\.workspace_sync/);

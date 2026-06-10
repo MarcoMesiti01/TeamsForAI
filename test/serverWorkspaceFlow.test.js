@@ -152,6 +152,7 @@ test("coordinate_reasoning_turn commits workspace entries and queues board sync"
     const logs = await getJson(`${baseUrl}/logs/session?client_session_id=commit-session`);
     assert.ok(logs.events.some((event) => event.category === "tool" && event.action === "execute" && event.status === "completed"));
     assert.ok(logs.events.some((event) => event.category === "whiteboard_job" && event.action === "queued"));
+    assert.ok(logs.events.every((event) => event.source_type === "test"));
   });
 });
 

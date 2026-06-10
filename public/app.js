@@ -26,12 +26,19 @@ const transcriptByItem = new Map();
 const handledToolCalls = new Set();
 const NODE_WIDTH = 210;
 const NODE_HEIGHT = 112;
+const BOARD_JOB_INITIAL_POLL_DELAY_MS = 700;
+const BOARD_JOB_MAX_POLL_DELAY_MS = 4000;
 let currentBoardState = { version: 0, nodes: [], edges: [], groups: [], can_undo: false };
 let dragState = null;
 const pendingWhiteboardJobs = new Set();
 const completedWhiteboardJobs = new Set();
 const workspaceSyncJobs = new Set();
 let boardJobPollTimer = null;
+let boardJobPollDelayMs = BOARD_JOB_INITIAL_POLL_DELAY_MS;
+let boardJobPollStartedAt = 0;
+let boardJobPollCount = 0;
+let boardJobPollCompletedCount = 0;
+let boardJobPollFailedCount = 0;
 let reasoningUndoInFlight = false;
 let currentWorkspaceCanUndo = false;
 let lastWorkspaceState = { version: 0, entries: [], working_memory: {}, can_undo: false };
@@ -278,7 +285,7 @@ function setWorkspaceSyncStatus(job) {
   }
 
   if (job.sync_status === "pending") {
-    workspaceStatusEl.textContent = "Workspace updated; synchronizing board...";
+    workspaceStatusEl.textContent = "Reasoning complete; board updating...";
     return;
   }
 
@@ -301,37 +308,75 @@ function trackWhiteboardJob(job) {
     setWorkspaceSyncStatus(job);
   }
   setStatus("updating board...");
-  appendLine("system", job.spoken_ack || "Updating board...");
+  appendLine("system", job.spoken_ack || "Reasoning complete; board updating...");
   startBoardJobPolling();
 }
 
 function startBoardJobPolling() {
+  if (!boardJobPollStartedAt) {
+    boardJobPollStartedAt = Date.now();
+    boardJobPollCount = 0;
+    boardJobPollCompletedCount = 0;
+    boardJobPollFailedCount = 0;
+    boardJobPollDelayMs = BOARD_JOB_INITIAL_POLL_DELAY_MS;
+  }
   if (boardJobPollTimer) return;
-  boardJobPollTimer = window.setInterval(pollWhiteboardJobs, 900);
   void pollWhiteboardJobs();
 }
 
+function scheduleBoardJobPoll() {
+  if (!pendingWhiteboardJobs.size || boardJobPollTimer) return;
+  boardJobPollTimer = window.setTimeout(pollWhiteboardJobs, boardJobPollDelayMs);
+}
+
+function recordBoardJobPollSummary() {
+  if (!boardJobPollStartedAt || !boardJobPollCount) return;
+  void recordClientEvent("board_job_poll_summary", "completed", "Board job polling completed", {
+    poll_count: boardJobPollCount,
+    duration_ms: Date.now() - boardJobPollStartedAt,
+    completed_jobs_seen: boardJobPollCompletedCount,
+    failed_jobs_seen: boardJobPollFailedCount,
+  });
+}
+
 function stopBoardJobPollingIfIdle() {
-  if (pendingWhiteboardJobs.size || !boardJobPollTimer) return;
-  window.clearInterval(boardJobPollTimer);
-  boardJobPollTimer = null;
-  setStatus(dc?.readyState === "open" ? "connected" : "idle");
+  if (pendingWhiteboardJobs.size) return;
+  if (boardJobPollTimer) {
+    window.clearTimeout(boardJobPollTimer);
+    boardJobPollTimer = null;
+  }
+  recordBoardJobPollSummary();
+  boardJobPollStartedAt = 0;
+  boardJobPollCount = 0;
+  boardJobPollDelayMs = BOARD_JOB_INITIAL_POLL_DELAY_MS;
+  if (boardJobPollCompletedCount) {
+    setStatus("board updated");
+  } else if (boardJobPollFailedCount) {
+    setStatus("board update needs attention");
+  } else {
+    setStatus(dc?.readyState === "open" ? "connected" : "idle");
+  }
+  boardJobPollCompletedCount = 0;
+  boardJobPollFailedCount = 0;
 }
 
 async function pollWhiteboardJobs() {
+  boardJobPollTimer = null;
   if (!pendingWhiteboardJobs.size) {
     stopBoardJobPollingIfIdle();
     return;
   }
 
+  boardJobPollCount += 1;
   try {
-    const resp = await fetch(`/board/jobs?client_session_id=${encodeURIComponent(clientSessionId)}`);
+    const resp = await fetch(`/board/jobs?client_session_id=${encodeURIComponent(clientSessionId)}&quiet=1`);
     const output = await resp.json();
     (output.jobs || []).forEach((job) => {
       if (!pendingWhiteboardJobs.has(job.job_id)) return;
       if (job.status === "completed") {
         pendingWhiteboardJobs.delete(job.job_id);
         completedWhiteboardJobs.add(job.job_id);
+        boardJobPollCompletedCount += 1;
         if (job.board_state) renderBoard(job.board_state);
         setWorkspaceSyncStatus(job);
         workspaceSyncJobs.delete(job.job_id);
@@ -339,6 +384,7 @@ async function pollWhiteboardJobs() {
       }
       if (job.status === "failed" || job.status === "needs_clarification") {
         pendingWhiteboardJobs.delete(job.job_id);
+        boardJobPollFailedCount += 1;
         setWorkspaceSyncStatus(job);
         workspaceSyncJobs.delete(job.job_id);
         appendLine("system", job.error || job.spoken_summary || "Board update needs clarification.");
@@ -348,7 +394,15 @@ async function pollWhiteboardJobs() {
     appendLine("system", `Board job polling failed: ${error.message}`);
     void recordClientEvent("board_job_poll", "failed", "Board job polling failed", { error: error.message });
   } finally {
-    stopBoardJobPollingIfIdle();
+    if (pendingWhiteboardJobs.size) {
+      boardJobPollDelayMs = Math.min(
+        BOARD_JOB_MAX_POLL_DELAY_MS,
+        Math.round(boardJobPollDelayMs * 1.45)
+      );
+      scheduleBoardJobPoll();
+    } else {
+      stopBoardJobPollingIfIdle();
+    }
   }
 }
 

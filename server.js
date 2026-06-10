@@ -24,6 +24,7 @@ const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const sessionStateStore = new Map();
 let reasoningCoordinatorOptions = {};
+let routeSourceType = process.env.TEAMSFORAI_SOURCE_TYPE || "live";
 const REALTIME_VOICES = new Set(["alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"]);
 
 function nowMs() {
@@ -50,6 +51,7 @@ function logRouteEvent({ sessionId, traceId, category, action, status, summary, 
   return recordEvent({
     session_id: getSessionId(sessionId),
     trace_id: traceId || makeTraceId(category || "trace"),
+    source_type: routeSourceType,
     category,
     action,
     status,
@@ -687,6 +689,7 @@ app.post("/tools/execute", async (req, res) => {
         recorder: defaultEventRecorder,
         session_id: clientSessionId,
         trace_id: traceId,
+        source_type: routeSourceType,
       });
       let whiteboardJob = null;
       if (result.board_command) {
@@ -697,6 +700,7 @@ app.post("/tools/execute", async (req, res) => {
           recorder: defaultEventRecorder,
           session_id: clientSessionId,
           trace_id: traceId,
+          source_type: routeSourceType,
         });
         whiteboardJob = {
           job_id: job.job_id,
@@ -743,6 +747,7 @@ app.post("/tools/execute", async (req, res) => {
             recorder: defaultEventRecorder,
             session_id: clientSessionId,
             trace_id: traceId,
+            source_type: routeSourceType,
           });
       if (toolName !== "delegate_to_brain" && intent.should_use_whiteboard === true) {
         const command = intent.board_command || buildWhiteboardCommandFromIntent(intent);
@@ -750,6 +755,7 @@ app.post("/tools/execute", async (req, res) => {
           recorder: defaultEventRecorder,
           session_id: clientSessionId,
           trace_id: traceId,
+          source_type: routeSourceType,
         });
         sessionStateStore.set(clientSessionId, state);
         const responseBody = {
@@ -788,6 +794,7 @@ app.post("/tools/execute", async (req, res) => {
         recorder: defaultEventRecorder,
         session_id: clientSessionId,
         trace_id: traceId,
+        source_type: routeSourceType,
       });
       sessionStateStore.set(clientSessionId, state);
       const responseBody = {
@@ -820,6 +827,7 @@ app.post("/tools/execute", async (req, res) => {
         recorder: defaultEventRecorder,
         session_id: clientSessionId,
         trace_id: traceId,
+        source_type: routeSourceType,
       });
       sessionStateStore.set(clientSessionId, state);
       const responseBody = {
@@ -930,6 +938,7 @@ app.post("/logs/client-event", (req, res) => {
   const event = recordEvent({
     session_id: clientSessionId,
     trace_id: req.body?.trace_id || makeTraceId("client"),
+    source_type: routeSourceType,
     category: req.body?.category || "frontend",
     action: req.body?.action || "client_event",
     status: req.body?.status || "info",
@@ -971,6 +980,11 @@ app.post("/workspace/undo", (req, res) => {
       workspace_context: buildCompactWorkspaceContext(state.workspace),
       sync_reason: "reasoning_undo",
       expected_workspace_version: state.workspace.version,
+    }, {
+      recorder: defaultEventRecorder,
+      session_id: clientSessionId,
+      trace_id: makeTraceId("workspace"),
+      source_type: routeSourceType,
     });
     whiteboardJob = {
       job_id: job.job_id,
@@ -1011,6 +1025,7 @@ app.post("/board/commands", (req, res) => {
       recorder: defaultEventRecorder,
       session_id: clientSessionId,
       trace_id: traceId,
+      source_type: routeSourceType,
     });
     sessionStateStore.set(clientSessionId, state);
     const responseBody = {
@@ -1060,18 +1075,21 @@ app.get("/board/jobs", (req, res) => {
   const clientSessionId = req.query?.client_session_id || "default";
   const state = getSessionState(clientSessionId);
   const jobs = listWhiteboardJobs(state);
-  logRouteEvent({
-    sessionId: clientSessionId,
-    traceId: makeTraceId("board"),
-    category: "board",
-    action: "jobs",
-    status: "info",
-    summary: "Board jobs listed.",
-    payload: {
-      jobs_count: jobs.length,
-      board_version: state.board.version,
-    },
-  });
+  const quiet = req.query?.quiet === "1" || req.query?.quiet === "true";
+  if (!quiet) {
+    logRouteEvent({
+      sessionId: clientSessionId,
+      traceId: makeTraceId("board"),
+      category: "board",
+      action: "jobs",
+      status: "info",
+      summary: "Board jobs listed.",
+      payload: {
+        jobs_count: jobs.length,
+        board_version: state.board.version,
+      },
+    });
+  }
   return res.json({
     jobs,
     board_state: getBoardSnapshot(state.board),
@@ -1200,6 +1218,7 @@ function setReasoningCoordinatorOptionsForTest(options = {}) {
 function resetServerStateForTest() {
   sessionStateStore.clear();
   reasoningCoordinatorOptions = {};
+  routeSourceType = "test";
 }
 
 if (require.main === module) {
